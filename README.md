@@ -22,5 +22,9 @@ It's very simple:
 # And how can I run it?
 If compilation was successful, you can find an executable **charond**. Just run it.
 
-# Can I configure Charon with a configuration file?
-Not yet, sorry. I am working on it.
+# TODO
+* fix all TODOs mentioned in code
+* simple http-handler + proxy
+* configuration file
+* timers (+red-black tree to store them)
+* generalized event system
