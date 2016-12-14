@@ -7,33 +7,33 @@
 
 static const char* HTTP_METHODS[] = { "GET", "POST" };
 
-struct http_request* http_request_create() {
-    struct http_request* request = (struct http_request*) malloc(sizeof(struct http_request));
+http_request_t* http_request_create() {
+    http_request_t* request = (http_request_t*) malloc(sizeof(http_request_t));
     request->body.total_size = 0;
     request->node = LIST_NODE_EMPTY;
     array_init(&request->buf, 20); // TODO: move to config
     return request;
 }
 
-void http_parser_init(struct http_parser* parser) {
+void http_parser_init(http_parser_t* parser) {
     parser->request_queue = LIST_EMPTY;
     parser->pos = 0;
 }
 
-struct http_parser* http_parser_create() {
-    struct http_parser* parser = (struct http_parser*) malloc(sizeof(struct http_parser));
+http_parser_t* http_parser_create() {
+    http_parser_t* parser = (http_parser_t*) malloc(sizeof(http_parser_t));
     http_parser_init(parser);
     return parser;
 }
 
-int http_parser_parse_buffer(struct http_parser* parser, struct http_request* request, char* buffer, size_t size) {
+int http_parser_parse_buffer(http_parser_t* parser, http_request_t* request, char* buffer, size_t size) {
     array_append(&request->buf, buffer, size);
     size = array_size(&request->buf);
     // TODO: move to config
     if (size > 1 << 20) {
         return -HTTP_PARSER_BUFFER_OVERFLOW;
     } else {
-        struct http_header header = HTTP_EMPTY_HEADER;
+        http_header_t header = HTTP_EMPTY_HEADER;
         const char* svalue;
 
         while (parser->pos < size) {
@@ -170,7 +170,7 @@ int http_parser_parse_buffer(struct http_parser* parser, struct http_request* re
 
                 case st_headers_start:
                     // TODO: move to config
-                    if (vector_init(&request->headers, struct http_header, 3) < 0) {
+                    if (vector_init(&request->headers, http_header_t, 3) < 0) {
                         return -HTTP_PARSER_NO_MEM;
                     }
                     parser->state = st_header_start;
@@ -232,7 +232,7 @@ int http_parser_parse_buffer(struct http_parser* parser, struct http_request* re
                         parser->pos++;
                         parser->state = st_header_start;
                         // TODO: store common request headers in separate http_request fields for speedup
-                        vector_push(&request->headers, &header, struct http_header);
+                        vector_push(&request->headers, &header, http_header_t);
                     } else {
                         return -HTTP_PARSER_INVALID_REQUEST;
                     }
@@ -292,9 +292,9 @@ int http_parser_parse_buffer(struct http_parser* parser, struct http_request* re
     return HTTP_PARSER_OK;
 }
 
-int http_parser_feed(struct http_parser* parser, char* buffer, size_t size) {
+int http_parser_feed(http_parser_t* parser, char* buffer, size_t size) {
     struct list_node* node = list_tail(&parser->request_queue);
-    struct http_request* request;
+    http_request_t* request;
 
     if (!node || parser->state == st_done) {
         parser->state = st_method_start;
@@ -303,7 +303,7 @@ int http_parser_feed(struct http_parser* parser, char* buffer, size_t size) {
         charon_debug("parsing new request");
         charon_debug("hp_state: null -> st_method_start");
     } else {
-        request = list_data(node, struct http_request);
+        request = list_data(node, http_request_t, node);
     }
 
     // TODO: HTTP pipelining is not supported now

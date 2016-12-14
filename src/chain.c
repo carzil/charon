@@ -3,13 +3,13 @@
 #include "chain.h"
 #include "errdefs.h"
 
-int chain_init(struct chain* chain) {
+int chain_init(chain_t* chain) {
     chain->buffers = LIST_EMPTY;
     return CHARON_OK;
 }
 
-struct chain* chain_create() {
-    struct chain* chain = (struct chain*) malloc(sizeof(struct chain));
+chain_t* chain_create() {
+    chain_t* chain = (chain_t*) malloc(sizeof(chain_t));
     if (!chain) {
         return NULL;
     }
@@ -17,6 +17,6 @@ struct chain* chain_create() {
     return chain;
 }
 
-void chain_push_buffer(struct chain* c, struct buffer* buf) {
-    list_append(&c->buffers, &buf->node);
+void chain_push_buffer(chain_t* ch, struct buffer* buf) {
+    list_append(&ch->buffers, &buf->node);
 }

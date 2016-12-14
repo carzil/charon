@@ -14,6 +14,7 @@
 #include <sys/stat.h>
 
 #include "server.h"
+#include "client.h"
 #include "utils/logging.h"
 #include "utils/string.h"
 
@@ -131,8 +132,8 @@ int start_server(charon_server* server, int port) {
     return 0;
 }
 
-charon_client_t* server_client_create(charon_server* server) {
-    charon_client_t* client = charon_client_create();
+connection_t* server_client_create(charon_server* server) {
+    connection_t* client = charon_client_create();
     client->node = LIST_NODE_EMPTY;
     list_append(&server->clients, &client->node);
     return client;
@@ -148,7 +149,7 @@ void server_loop(charon_server* server) {
         for (size_t i = 0; i < events_count; i++) {
             struct epoll_event* event = events;
             if (event->data.fd == server->socket) {
-                charon_client_t* client = server_client_create(server);
+                connection_t* client = server_client_create(server);
                 socklen_t in_addr_len = sizeof(struct sockaddr);
                 int new_fd = accept(server->socket, &client->addr, &in_addr_len);
                 if (new_fd == -1) {
@@ -166,7 +167,7 @@ void server_loop(charon_server* server) {
                 ctl_event.events = EPOLLIN;
 
                 if (epoll_ctl(server->epoll_fd, EPOLL_CTL_ADD, new_fd, &ctl_event) == -1) {
-                    charon_perror("epoll_ctl: ");   
+                    charon_perror("epoll_ctl: ");
                 }
 
                 char hbuf[NI_MAXHOST];
@@ -175,7 +176,7 @@ void server_loop(charon_server* server) {
                     charon_info("accepted client from %s:%s (fd=%d)", hbuf, sbuf, new_fd);
                 }
             } else {
-                charon_client_t* client = (charon_client_t*) event->data.ptr;
+                connection_t* client = (connection_t*) event->data.ptr;
                 bool connection_ended = false;
                 while (1) {
                     char buffer[1024];
@@ -197,22 +198,24 @@ void server_loop(charon_server* server) {
                             close(client->fd);
                         } else if (res == HTTP_PARSER_DONE_REQUEST) {
                             struct list_node* ptr = list_head(&client->parser.request_queue);
-                            while (ptr && list_data(ptr, struct http_request)->parsed) {
-                                struct http_request* request = list_peek(&client->parser.request_queue, struct request);
+                            while (ptr && list_data(ptr, http_request_t, node)->parsed) {
+                                http_request_t* request = list_peek(&client->parser.request_queue, http_request_t, node);
                                 ptr = list_head(&client->parser.request_queue);
                                 char rbuf[1000];
-                                struct chain* ch = chain_create();
+                                chain_t* ch = chain_create();
                                 struct buffer* buf = buffer_create();
                                 struct stat st;
                                 char* path_z = copy_string_z(request->uri.path.start, string_size(&request->uri.path));
                                 while (*path_z == '/') {
                                     path_z++;
                                 }
+                                charon_debug("open('%s')", path_z);
                                 stat(path_z, &st);
                                 int file_fd = open(path_z, O_RDONLY);
                                 if (file_fd > 0) {
-                                    snprintf(rbuf, 1000, "HTTP/1.1 200 Ok\r\nConnection: close\r\nContent-Length: %d\r\n\r\n", st.st_size);
+                                    snprintf(rbuf, 1000, "HTTP/1.1 200 Ok\r\nConnection: close\r\nContent-Length: %ld\r\n\r\n", st.st_size);
                                 } else {
+                                    charon_perror("open: ");
                                     snprintf(rbuf, 1000, "HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 44\r\n\r\n<html><body><h1>Not Found</h1></body></html>");
                                 }
                                 buf->memory.start = rbuf;
@@ -227,7 +230,7 @@ void server_loop(charon_server* server) {
                                     buf->flags |= BUFFER_IN_FILE;
                                     chain_push_buffer(ch, buf);
                                 }
-                                client_chain_write(client, request, ch);
+                                connection_chain_write(client, request, ch);
                                 charon_debug("found parsed request");
                             }
                         }

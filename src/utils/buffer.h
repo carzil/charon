@@ -19,7 +19,7 @@ struct buffer {
 
     union {
         struct {
-            uint8_t* start;
+            void* start;
         } memory;
 
         struct {

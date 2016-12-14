@@ -48,48 +48,28 @@ typedef enum {
 
 typedef int http_method_t;
 typedef int http_status_t;
-typedef char* http_uri_t;
 
-struct http_header {
-    char* name;
-    char* value;
-};
-
-#define HTTP_EMPTY_HEADER (struct http_header) { NULL, NULL }
-
-struct http_body {
-    char* buf;
-    size_t total_size;
-};
-
-struct http_version {
-    int major;
-    int minor;
-};
-
-struct http_uri {
-    struct string scheme;
-    struct string host;
-    int port;
-    struct string path;
-};
-
-struct http_request {
+struct http_request_s {
     struct list_node node;
 
     struct array buf;
     int method;
-    struct http_uri uri;
-    struct http_version http_version;
-    struct http_body body;
-    struct vector headers;
+    http_uri_t uri;
+    http_version_t http_version;
+    http_body_t body;
+    struct vector headers; // vector of struct http_headers
 
     int parsed; // TODO: request flags
+
+    http_response_t response; // for every 
 };
 
-static inline const char* http_request_header_value(struct http_request* r, const char* header_name) {
+typedef struct http_parser_s http_parser_t;
+typedef struct http_request_s http_request_t;
+
+static inline const char* http_request_header_value(http_request_t* r, const char* header_name) {
     for (size_t i = 0; i < vector_size(&r->headers); i++) {
-        struct http_header* header = vector_data(&r->headers, i, struct http_header);
+        http_header_t* header = vector_data(&r->headers, i, http_header_t);
         if (!strcmp(header->name, header_name)) {
             return header->value;
         }
@@ -97,15 +77,15 @@ static inline const char* http_request_header_value(struct http_request* r, cons
     return NULL;
 }
 
-struct http_parser {
+struct http_parser_s {
     size_t pos;
     http_parser_state state;
     struct list request_queue;
 };
 
-void http_parser_init(struct http_parser*);
-struct http_parser* http_parser_create();
-int http_parser_feed(struct http_parser* parser, char* buffer, size_t size);
+void http_parser_init(http_parser_t* p);
+http_parser_t* http_parser_create();
+int http_parser_feed(http_parser_t* parser, char* buffer, size_t size);
 void http_parser_free();
 
 #endif

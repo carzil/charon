@@ -24,12 +24,12 @@ struct list {
 
 /* TODO: make it possible to  place list_node in any field of struct (use offsetof) */
 
-#define list_data(node_ptr, type) ((type*)((char*)(node_ptr)))
+#define list_data(node_ptr, type, node_field) ((type*) (((uint8_t*)(node_ptr)) - offsetof(type, node_field)))
 #define list_next(node_ptr) ((node_ptr)->next)
 #define list_head(l) ((l)->head)
 #define list_tail(l) ((l)->tail)
 #define list_foreach(l, var) for (var = list_head(l); var; var = list_next(var))
-#define list_peek(l, type) list_data(__list_peek(l), type)
+#define list_peek(l, type, node_field) list_data(__list_peek(l), type, node_field)
 
 #define LIST_EMPTY (struct list) { NULL, NULL }
 #define LIST_NODE_EMPTY (struct list_node) { NULL, NULL }

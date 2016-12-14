@@ -14,11 +14,12 @@ typedef struct {
 
     int fd;
     struct sockaddr addr;
-    struct http_parser parser;
+    http_parser_t parser;
 
-    struct chain chain;
-} charon_client_t;
+    chain_t chain;
+} connection_t;
 
-charon_client_t* charon_client_create();
+connection_t* charon_client_create();
+int connection_chain_write(connection_t* c, http_request_t* r, chain_t* chain);
 
 #endif
