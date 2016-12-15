@@ -7,7 +7,8 @@
 
 static const char* HTTP_METHODS[] = { "GET", "POST" };
 
-http_request_t* http_request_create() {
+http_request_t* http_request_create()
+{
     http_request_t* request = (http_request_t*) malloc(sizeof(http_request_t));
     request->body.total_size = 0;
     request->node = LIST_NODE_EMPTY;
@@ -15,18 +16,21 @@ http_request_t* http_request_create() {
     return request;
 }
 
-void http_parser_init(http_parser_t* parser) {
+void http_parser_init(http_parser_t* parser)
+{
     parser->request_queue = LIST_EMPTY;
     parser->pos = 0;
 }
 
-http_parser_t* http_parser_create() {
+http_parser_t* http_parser_create()
+{
     http_parser_t* parser = (http_parser_t*) malloc(sizeof(http_parser_t));
     http_parser_init(parser);
     return parser;
 }
 
-int http_parser_parse_buffer(http_parser_t* parser, http_request_t* request, char* buffer, size_t size) {
+int http_parser_parse_buffer(http_parser_t* parser, http_request_t* request, char* buffer, size_t size)
+{
     array_append(&request->buf, buffer, size);
     size = array_size(&request->buf);
     // TODO: move to config
@@ -292,7 +296,8 @@ int http_parser_parse_buffer(http_parser_t* parser, http_request_t* request, cha
     return HTTP_PARSER_OK;
 }
 
-int http_parser_feed(http_parser_t* parser, char* buffer, size_t size) {
+int http_parser_feed(http_parser_t* parser, char* buffer, size_t size)
+{
     struct list_node* node = list_tail(&parser->request_queue);
     http_request_t* request;
 

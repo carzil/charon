@@ -14,7 +14,8 @@ typedef enum {
     PERROR
 } loglevel_t;
 
-static inline void charon_log(loglevel_t lvl, const char* fmt, va_list args) {
+static inline void charon_log(loglevel_t lvl, const char* fmt, va_list args)
+{
     char buffer[4096];
 
     const char* lvl_string;
@@ -58,7 +59,8 @@ static inline void charon_log(loglevel_t lvl, const char* fmt, va_list args) {
 
 #ifdef CHARON_DEBUG
 
-static inline void charon_debug(const char* fmt, ...) {
+static inline void charon_debug(const char* fmt, ...)
+{
     va_list args;
     va_start(args, fmt);
     charon_log(DEBUG, fmt, args);
@@ -71,21 +73,24 @@ static inline void charon_debug(const char* fmt, ...) {
 
 #endif
 
-static inline void charon_info(const char* fmt, ...) {
+static inline void charon_info(const char* fmt, ...)
+{
     va_list args;
     va_start(args, fmt);
     charon_log(INFO, fmt, args);
     va_end(args);
 }
 
-static inline void charon_error(const char* fmt, ...) {
+static inline void charon_error(const char* fmt, ...)
+{
     va_list args;
     va_start(args, fmt);
     charon_log(ERROR, fmt, args);
     va_end(args);
 }
 
-static inline void charon_perror(const char* fmt, ...) {
+static inline void charon_perror(const char* fmt, ...)
+{
     va_list args;
     va_start(args, fmt);
     charon_log(PERROR, fmt, args);

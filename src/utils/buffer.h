@@ -7,8 +7,10 @@
 #include "utils/list.h"
 #include "errdefs.h"
 
-#define BUFFER_IN_MEMORY 1
-#define BUFFER_IN_FILE 2
+enum {
+    BUFFER_IN_MEMORY = 1,
+    BUFFER_IN_FILE = 1 << 1,
+};
 
 struct buffer {
     struct list_node node;
@@ -29,14 +31,16 @@ struct buffer {
     };
 };
 
-static inline int buffer_init(struct buffer* buffer) {
+static inline int buffer_init(struct buffer* buffer)
+{
     buffer->node = LIST_NODE_EMPTY;
     buffer->size = 0;
     buffer->flags = 0;
     return CHARON_OK;
 }
 
-static inline struct buffer* buffer_create() {
+static inline struct buffer* buffer_create()
+{
     struct buffer* buffer = (struct buffer*) malloc(sizeof(struct buffer));
     if (!buffer) {
         return NULL;

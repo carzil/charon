@@ -34,19 +34,22 @@ struct list {
 #define LIST_EMPTY (struct list) { NULL, NULL }
 #define LIST_NODE_EMPTY (struct list_node) { NULL, NULL }
 
-static inline int list_init(struct list* l) {
+static inline int list_init(struct list* l)
+{
     l->head = NULL;
     l->tail = NULL;
     return 0;
 }
 
-static inline struct list* list_create() {
+static inline struct list* list_create()
+{
     struct list* l = (struct list*) malloc(sizeof(struct list));
     list_init(l);
     return l;
 }
 
-static inline void list_append(struct list* l, struct list_node* node) {
+static inline void list_append(struct list* l, struct list_node* node)
+{
     node->next = NULL;
     if (!l->head) {
         l->head = l->tail = node;
@@ -57,7 +60,8 @@ static inline void list_append(struct list* l, struct list_node* node) {
     }
 }
 
-static inline void list_remove(struct list* l, struct list_node* node) {
+static inline void list_remove(struct list* l, struct list_node* node)
+{
     if (node == l->head) {
         l->head = l->head->next;
         l->tail = NULL;
@@ -73,14 +77,16 @@ static inline void list_remove(struct list* l, struct list_node* node) {
     }
 }
 
-static inline struct list_node* __list_peek(struct list* l) {
+static inline struct list_node* __list_peek(struct list* l)
+{
     struct list_node* node = l->head;
     list_remove(l, node);
     node->next = NULL;
     return node;
 }
 
-static inline void list_free(struct list* l) {
+static inline void list_free(struct list* l)
+{
     free(l);
 }
 

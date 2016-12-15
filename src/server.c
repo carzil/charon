@@ -24,7 +24,8 @@
  * timed out connections.
  */
 
-charon_server* create_server() {
+charon_server* create_server()
+{
     charon_server* server = (charon_server*) malloc(sizeof(charon_server));
     memset(server, '\0', sizeof(charon_server));
     server->socket = -1;
@@ -32,11 +33,13 @@ charon_server* create_server() {
     return server;
 }
 
-void destroy_server(charon_server* server) {
+void destroy_server(charon_server* server)
+{
     free(server);
 }
 
-int set_fd_non_blocking(int fd) {
+int set_fd_non_blocking(int fd)
+{
     int flags = fcntl(fd, F_GETFL, 0);
     if (flags == -1) {
         return -1;
@@ -51,7 +54,8 @@ int set_fd_non_blocking(int fd) {
     return 0;
 }
 
-int start_server(charon_server* server, int port) {
+int start_server(charon_server* server, int port)
+{
     struct addrinfo hints;
     struct addrinfo* result;
 
@@ -132,55 +136,75 @@ int start_server(charon_server* server, int port) {
     return 0;
 }
 
-connection_t* server_client_create(charon_server* server) {
+connection_t* server_client_create(charon_server* server)
+{
     connection_t* client = charon_client_create();
     client->node = LIST_NODE_EMPTY;
     list_append(&server->clients, &client->node);
     return client;
 }
 
-void server_loop(charon_server* server) {
-    charon_info("started server loop");
+int chrn_server_accept_client(charon_server* server)
+{
     struct epoll_event ctl_event;
+    connection_t* client = server_client_create(server);
+    socklen_t in_addr_len = sizeof(struct sockaddr);
+
+    int new_fd = accept(server->socket, &client->addr, &in_addr_len);
+    if (new_fd == -1) {
+        charon_perror("accept: ");
+        return -1;
+    }
+    if (set_fd_non_blocking(new_fd) == -1) {
+        charon_perror("cannot set fd to non-blocking mode: ");
+        return -1;
+    }
+
+    memset(&ctl_event, 0, sizeof(ctl_event));
+    client->fd = new_fd;
+    ctl_event.data.ptr = client;
+    ctl_event.events = EPOLLIN;
+
+    if (epoll_ctl(server->epoll_fd, EPOLL_CTL_ADD, new_fd, &ctl_event) == -1) {
+        charon_perror("epoll_ctl: ");
+        return -1;
+    }
+
+    char hbuf[NI_MAXHOST];
+    char sbuf[NI_MAXSERV];
+    if (getnameinfo(&client->addr, in_addr_len, hbuf, sizeof(hbuf), sbuf, sizeof(sbuf), NI_NUMERICHOST | NI_NUMERICSERV) == 0) {
+        charon_info("accepted client from %s:%s (fd=%d)", hbuf, sbuf, new_fd);
+    }
+
+    return CHARON_OK;
+}
+
+void server_loop(charon_server* server)
+{
+    charon_info("started server loop");
     struct epoll_event events[MAX_EVENTS];
+    struct epoll_event* event;
+
     while (server->is_running) {
-        size_t events_count = epoll_wait(server->epoll_fd, events, MAX_EVENTS, -1);
+        int events_count = epoll_wait(server->epoll_fd, events, MAX_EVENTS, -1);
+
+        if (events_count == -1) {
+            charon_perror("epoll_wait: ");
+            server->is_running = false;
+            break;
+        }
+
         charon_debug("%d events in queue", events_count);
-        for (size_t i = 0; i < events_count; i++) {
-            struct epoll_event* event = events;
+        for (int i = 0; i < events_count; i++) {
+            event = events + i;
             if (event->data.fd == server->socket) {
-                connection_t* client = server_client_create(server);
-                socklen_t in_addr_len = sizeof(struct sockaddr);
-                int new_fd = accept(server->socket, &client->addr, &in_addr_len);
-                if (new_fd == -1) {
-                    charon_perror("accept: ");
-                    continue;
-                }
-                if (set_fd_non_blocking(new_fd) == -1) {
-                    charon_perror("cannot set fd to non-blocking mode: ");
-                    break;
-                }
-
-                memset(&ctl_event, 0, sizeof(ctl_event));
-                client->fd = new_fd;
-                ctl_event.data.ptr = client;
-                ctl_event.events = EPOLLIN;
-
-                if (epoll_ctl(server->epoll_fd, EPOLL_CTL_ADD, new_fd, &ctl_event) == -1) {
-                    charon_perror("epoll_ctl: ");
-                }
-
-                char hbuf[NI_MAXHOST];
-                char sbuf[NI_MAXSERV];
-                if (getnameinfo(&client->addr, in_addr_len, hbuf, sizeof(hbuf), sbuf, sizeof(sbuf), NI_NUMERICHOST | NI_NUMERICSERV) == 0) {
-                    charon_info("accepted client from %s:%s (fd=%d)", hbuf, sbuf, new_fd);
-                }
+                chrn_server_accept_client(server);
             } else {
                 connection_t* client = (connection_t*) event->data.ptr;
                 bool connection_ended = false;
-                while (1) {
+                for (;;) {
                     char buffer[1024];
-                    int count = read(client->fd, buffer, sizeof(buffer));
+                    ssize_t count = read(client->fd, buffer, sizeof(buffer));
                     if (count == -1) {
                         if (errno != EAGAIN) {
                             charon_perror("read: ");
@@ -202,7 +226,7 @@ void server_loop(charon_server* server) {
                                 http_request_t* request = list_peek(&client->parser.request_queue, http_request_t, node);
                                 ptr = list_head(&client->parser.request_queue);
                                 char rbuf[1000];
-                                chain_t* ch = chain_create();
+                                chain_t* ch = chrn_chain_create();
                                 struct buffer* buf = buffer_create();
                                 struct stat st;
                                 char* path_z = copy_string_z(request->uri.path.start, string_size(&request->uri.path));
@@ -221,14 +245,14 @@ void server_loop(charon_server* server) {
                                 buf->memory.start = rbuf;
                                 buf->size = strlen(rbuf);
                                 buf->flags |= BUFFER_IN_MEMORY;
-                                chain_push_buffer(ch, buf);
+                                chrn_chain_push_buffer(ch, buf);
                                 if (file_fd > 0) {
                                     buf = buffer_create();
                                     buf->file.fd = file_fd;
                                     buf->file.pos = 0;
                                     buf->size = st.st_size;
                                     buf->flags |= BUFFER_IN_FILE;
-                                    chain_push_buffer(ch, buf);
+                                    chrn_chain_push_buffer(ch, buf);
                                 }
                                 connection_chain_write(client, request, ch);
                                 charon_debug("found parsed request");
@@ -244,16 +268,19 @@ void server_loop(charon_server* server) {
             }
         }
     }
+
     // TODO: graceful shutdown
     shutdown(server->socket, SHUT_RDWR);
     close(server->socket);
 }
 
-void stop_server(charon_server* server) {
+void stop_server(charon_server* server)
+{
     server->is_running = false;
 }
 
-void sigint_handler(int sig) {
+void sigint_handler(int sig)
+{
     charon_debug("Ctrl+C catched");
     stop_server(global_server);
     exit(0);
@@ -261,7 +288,8 @@ void sigint_handler(int sig) {
 
 charon_server* global_server;
 
-int server_main(int argc, char *argv[]) {
+int server_main(int argc, char *argv[])
+{
     if (argc < 1) {
         charon_error("no port provided");
         return 1;

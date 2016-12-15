@@ -12,7 +12,8 @@ struct vector {
     size_t size;
 };
 
-static inline int __vector_init(struct vector* v, size_t type_size, size_t initial_size) {
+static inline int __vector_init(struct vector* v, size_t type_size, size_t initial_size)
+{
     int res = array_init(&v->buf, initial_size * type_size);
     if (res < 0) {
         return res;
@@ -21,7 +22,8 @@ static inline int __vector_init(struct vector* v, size_t type_size, size_t initi
     return CHARON_OK;
 }
 
-static inline struct vector* __vector_create(size_t type_size, size_t initial_size) {
+static inline struct vector* __vector_create(size_t type_size, size_t initial_size)
+{
     struct vector* v = (struct vector*) malloc(sizeof(struct vector));
     if (!v) {
         return NULL;
@@ -29,7 +31,8 @@ static inline struct vector* __vector_create(size_t type_size, size_t initial_si
     __vector_init(v, type_size, initial_size);
 }
 
-static inline int __vector_push(struct vector* v, size_t type_size, char* mem) {
+static inline int __vector_push(struct vector* v, size_t type_size, char* mem)
+{
     int res = array_append(&v->buf, mem, type_size);
     if (res < 0) {
         return res;

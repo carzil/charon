@@ -4,13 +4,15 @@
 #include "server.h"
 #include "utils/array.h"
 
-connection_t* charon_client_create() {
+connection_t* charon_client_create()
+{
     connection_t* client = (connection_t*) malloc(sizeof(connection_t));
     http_parser_init(&client->parser);
     return client;
 }
 
-int connection_chain_write(connection_t* client, http_request_t* r, chain_t* chain) {
+int connection_chain_write(connection_t* client, http_request_t* r, chain_t* chain)
+{
     struct list_node* ptr;
     off_t offset;
     list_foreach(&chain->buffers, ptr) {

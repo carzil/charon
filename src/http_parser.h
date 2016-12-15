@@ -67,7 +67,8 @@ struct http_request_s {
 typedef struct http_parser_s http_parser_t;
 typedef struct http_request_s http_request_t;
 
-static inline const char* http_request_header_value(http_request_t* r, const char* header_name) {
+static inline const char* http_request_header_value(http_request_t* r, const char* header_name)
+{
     for (size_t i = 0; i < vector_size(&r->headers); i++) {
         http_header_t* header = vector_data(&r->headers, i, http_header_t);
         if (!strcmp(header->name, header_name)) {

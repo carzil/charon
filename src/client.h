@@ -20,6 +20,6 @@ typedef struct {
 } connection_t;
 
 connection_t* charon_client_create();
-int connection_chain_write(connection_t* c, http_request_t* r, chain_t* chain);
+int connection_chain_write(connection_t* client, http_request_t* r, chain_t* chain);
 
 #endif

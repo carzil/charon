@@ -4,8 +4,9 @@
 
 #include "server.h"
 
-void usage() {
-    fprintf(stderr, "Usage: charon\n");
+void usage()
+{
+    fprintf(stderr, "Usage: charon port\n");
     exit(0);
 }
 
@@ -17,7 +18,8 @@ struct my_data {
     short b;
 };
 
-int main(int argc, char *argv[]) {
+int main(int argc, char *argv[])
+{
     // struct list l;
     // list_init(&l);
     // struct my_data arr[10];

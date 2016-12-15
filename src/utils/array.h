@@ -18,7 +18,8 @@ struct array {
     char* data;
 };
 
-static inline int array_init(struct array* array, size_t capacity) {
+static inline int array_init(struct array* array, size_t capacity)
+{
     array->data = (char*) malloc(capacity);
     array->size = 0;
     array->capacity = capacity;
@@ -28,13 +29,15 @@ static inline int array_init(struct array* array, size_t capacity) {
     return CHARON_OK;
 }
 
-static inline struct array* array_create(size_t capacity) {
+static inline struct array* array_create(size_t capacity)
+{
     struct array* array = (struct array*) malloc(sizeof(struct array));
     array_init(array, capacity);
     return array;
 }
 
-static inline int array_ensure_capacity(struct array* array, size_t capacity) {
+static inline int array_ensure_capacity(struct array* array, size_t capacity)
+{
     charon_debug("ensure capacity: have %d bytes, requested %d bytes", array->capacity, capacity);
     if (capacity > array->capacity) {
         size_t new_capacity = array->capacity;
@@ -54,7 +57,8 @@ static inline int array_ensure_capacity(struct array* array, size_t capacity) {
     return CHARON_OK;
 }
 
-static inline int array_append(struct array* array, char* ptr, size_t size) {
+static inline int array_append(struct array* array, char* ptr, size_t size)
+{
     int res;
     if ((res = array_ensure_capacity(array, size + array->size)) < 0) {
         return res;
@@ -64,13 +68,15 @@ static inline int array_append(struct array* array, char* ptr, size_t size) {
     return CHARON_OK;
 }
 
-static inline void array_consume(struct array* array, size_t to_consume) {
+static inline void array_consume(struct array* array, size_t to_consume)
+{
     assert(array->size >= to_consume);
     memmove(array->data, array->data + to_consume, array->size - to_consume);
     array->size -= to_consume;
 }
 
-static inline void array_destroy(struct array* array) {
+static inline void array_destroy(struct array* array)
+{
     free(array->data);
     free(array);
 }
