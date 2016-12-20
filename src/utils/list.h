@@ -29,6 +29,7 @@ struct list {
 #define list_head(l) ((l)->head)
 #define list_tail(l) ((l)->tail)
 #define list_foreach(l, var) for (var = list_head(l); var; var = list_next(var))
+#define list_foreach_safe(l, var, tmp) for (var = (l)->head, tmp = (var) ? var->next : NULL; var != NULL; var = tmp, tmp = (var) ? var->next : NULL)
 #define list_peek(l, type, node_field) list_data(__list_peek(l), type, node_field)
 
 #define LIST_EMPTY (struct list) { NULL, NULL }
@@ -64,10 +65,16 @@ static inline void list_remove(struct list* l, struct list_node* node)
 {
     if (node == l->head) {
         l->head = l->head->next;
-        l->tail = NULL;
+        if (l->head == NULL) {
+            l->tail = NULL;
+        }
     } else if (node == l->tail) {
         l->tail = l->tail->prev;
-        l->tail->next = NULL;
+        if (list->tail == NULL) {
+            list->head = NULL;
+        } else {
+            l->tail->next = NULL;
+        }
     } else {
         struct list_node* a = node->prev;
         struct list_node* c = node->next;
