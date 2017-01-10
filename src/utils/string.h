@@ -1,10 +1,17 @@
 #ifndef _STRING_H_
 #define _STRING_H_
 
+#include <string.h>
+#include <stdlib.h>
+
 struct string {
     char* start;
     char* end;
 };
+
+typedef struct string string_t;
+
+#define STRING_EMPTY (string_t) { NULL, NULL }
 
 #define string_size(s) ((s)->end - (s)->start)
 
@@ -30,15 +37,17 @@ static inline char* copy_string(char* buf, size_t size)
     return result;
 }
 
-static inline int itoa(const char* buf)
+static inline int string_to_int(const string_t* str)
 {
     int result = 0;
-    while (*buf != '\0') {
+    char* pos = str->start;
+    while (pos != str->end) {
         result *= 10;
-        result += *buf - '0';
-        buf++;
+        result += *pos - '0';
+        pos++;
     }
     return result;
 }
+
 
 #endif

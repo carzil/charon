@@ -12,14 +12,16 @@
 #define MAX_EVENTS 64
 #define INITIAL_CLIENT_BUFFER_SIZE 128
 
-typedef struct {
+struct charon_server_s {
     int socket;
     struct sockaddr_in addr;
     int epoll_fd;
     bool is_running;
 
     struct list clients;
-} charon_server;
+};
+
+typedef struct charon_server_s charon_server;
 
 int server_main(int argc, char *argv[]);
 
@@ -30,5 +32,6 @@ void destroy_server(charon_server* worker);
 int start_server(charon_server* server, int port);
 void stop_server(charon_server* server);
 void server_loop(charon_server* server);
+void charon_server_end_conn(charon_server* server, connection_t* c);
 
 #endif

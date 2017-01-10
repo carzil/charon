@@ -6,7 +6,7 @@
 #include "utils/logging.h"
 
 /*
- * Implementation if doubly linked list. The main idea to embed
+ * Implementation of doubly linked list. The main idea to embed
  * list metadata into user's structure. It helps processor to use
  * caching more effectively.
  */
@@ -21,8 +21,6 @@ struct list {
     struct list_node* head;
     struct list_node* tail;
 };
-
-/* TODO: make it possible to  place list_node in any field of struct (use offsetof) */
 
 #define list_data(node_ptr, type, node_field) ((type*) (((uint8_t*)(node_ptr)) - offsetof(type, node_field)))
 #define list_next(node_ptr) ((node_ptr)->next)
@@ -70,8 +68,8 @@ static inline void list_remove(struct list* l, struct list_node* node)
         }
     } else if (node == l->tail) {
         l->tail = l->tail->prev;
-        if (list->tail == NULL) {
-            list->head = NULL;
+        if (l->tail == NULL) {
+            l->head = NULL;
         } else {
             l->tail->next = NULL;
         }

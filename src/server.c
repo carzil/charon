@@ -15,6 +15,7 @@
 
 #include "server.h"
 #include "client.h"
+#include "http_handler.h"
 #include "utils/logging.h"
 #include "utils/string.h"
 
@@ -138,55 +139,80 @@ int start_server(charon_server* server, int port)
 
 connection_t* server_client_create(charon_server* server)
 {
-    connection_t* client = charon_client_create();
+    connection_t* client = chrn_conn_create();
     client->node = LIST_NODE_EMPTY;
     list_append(&server->clients, &client->node);
     return client;
 }
 
-int chrn_server_accept_client(charon_server* server)
+int chrn_server_accept_client(charon_server* server, connection_t** result)
 {
     struct epoll_event ctl_event;
     connection_t* client = server_client_create(server);
     socklen_t in_addr_len = sizeof(struct sockaddr);
+    int error;
 
     int new_fd = accept(server->socket, &client->addr, &in_addr_len);
     if (new_fd == -1) {
         charon_perror("accept: ");
-        return -1;
+        error = -CHARON_ERR;
+        goto cleanup;
     }
     if (set_fd_non_blocking(new_fd) == -1) {
         charon_perror("cannot set fd to non-blocking mode: ");
-        return -1;
+        error = -CHARON_ERR;
+        goto cleanup;
     }
 
     memset(&ctl_event, 0, sizeof(ctl_event));
     client->fd = new_fd;
     ctl_event.data.ptr = client;
-    ctl_event.events = EPOLLIN;
+    ctl_event.events = EPOLLIN | EPOLLET;
 
     if (epoll_ctl(server->epoll_fd, EPOLL_CTL_ADD, new_fd, &ctl_event) == -1) {
         charon_perror("epoll_ctl: ");
-        return -1;
+        error = -CHARON_ERR;
+        goto cleanup;
     }
 
-    char hbuf[NI_MAXHOST];
-    char sbuf[NI_MAXSERV];
-    if (getnameinfo(&client->addr, in_addr_len, hbuf, sizeof(hbuf), sbuf, sizeof(sbuf), NI_NUMERICHOST | NI_NUMERICSERV) == 0) {
-        charon_info("accepted client from %s:%s (fd=%d)", hbuf, sbuf, new_fd);
+    if (getnameinfo(&client->addr, in_addr_len,
+                    client->hbuf, sizeof(client->hbuf),
+                    client->sbuf, sizeof(client->sbuf),
+                    NI_NUMERICHOST | NI_NUMERICSERV) == 0) {
+        charon_info("accepted client from %s:%s (fd=%d)", client->hbuf, client->sbuf, new_fd);
     }
 
+    *result = client;
     return CHARON_OK;
+
+    cleanup:
+    chrn_conn_destroy(client);
+    free(client);
+    return error;
+}
+
+void charon_server_end_conn(charon_server* server, connection_t* c)
+{
+    charon_info("connection closed fd=%d, addr=%s:%s", c->fd, c->hbuf, c->sbuf);
+    http_handler_on_connection_end(server, c);
+    close(c->fd);
+    list_remove(&server->clients, &c->node);
+    chrn_conn_destroy(c);
+    free(c);
 }
 
 void server_loop(charon_server* server)
 {
-    charon_info("started server loop");
     struct epoll_event events[MAX_EVENTS];
     struct epoll_event* event;
+    struct list_node* ptr;
+    struct list_node* ptr_safe;
+    connection_t* c;
+    int events_count;
 
+    charon_info("started server loop");
     while (server->is_running) {
-        int events_count = epoll_wait(server->epoll_fd, events, MAX_EVENTS, -1);
+        events_count = epoll_wait(server->epoll_fd, events, MAX_EVENTS, -1);
 
         if (events_count == -1) {
             charon_perror("epoll_wait: ");
@@ -198,80 +224,25 @@ void server_loop(charon_server* server)
         for (int i = 0; i < events_count; i++) {
             event = events + i;
             if (event->data.fd == server->socket) {
-                chrn_server_accept_client(server);
+                chrn_server_accept_client(server, &c);
+                http_handler_connection_init(c);
             } else {
-                connection_t* client = (connection_t*) event->data.ptr;
-                bool connection_ended = false;
-                for (;;) {
-                    char buffer[1024];
-                    ssize_t count = read(client->fd, buffer, sizeof(buffer));
-                    if (count == -1) {
-                        if (errno != EAGAIN) {
-                            charon_perror("read: ");
-                            connection_ended = true;
-                        }
-                        break;
-                    } else if (count == 0) {
-                        connection_ended = true;
-                        break;
-                    } else {
-                        charon_debug("readed %d bytes from fd=%d", count, client->fd);
-                        int res = http_parser_feed(&client->parser, buffer, count);
-                        if (res < 0) {
-                            shutdown(client->fd, SHUT_RDWR);
-                            close(client->fd);
-                        } else if (res == HTTP_PARSER_DONE_REQUEST) {
-                            struct list_node* ptr = list_head(&client->parser.request_queue);
-                            while (ptr && list_data(ptr, http_request_t, node)->parsed) {
-                                http_request_t* request = list_peek(&client->parser.request_queue, http_request_t, node);
-                                ptr = list_head(&client->parser.request_queue);
-                                char rbuf[1000];
-                                chain_t* ch = chrn_chain_create();
-                                struct buffer* buf = buffer_create();
-                                struct stat st;
-                                char* path_z = copy_string_z(request->uri.path.start, string_size(&request->uri.path));
-                                while (*path_z == '/') {
-                                    path_z++;
-                                }
-                                charon_debug("open('%s')", path_z);
-                                stat(path_z, &st);
-                                int file_fd = open(path_z, O_RDONLY);
-                                if (file_fd > 0) {
-                                    snprintf(rbuf, 1000, "HTTP/1.1 200 Ok\r\nConnection: close\r\nContent-Length: %ld\r\n\r\n", st.st_size);
-                                } else {
-                                    charon_perror("open: ");
-                                    snprintf(rbuf, 1000, "HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 44\r\n\r\n<html><body><h1>Not Found</h1></body></html>");
-                                }
-                                buf->memory.start = rbuf;
-                                buf->size = strlen(rbuf);
-                                buf->flags |= BUFFER_IN_MEMORY;
-                                chrn_chain_push_buffer(ch, buf);
-                                if (file_fd > 0) {
-                                    buf = buffer_create();
-                                    buf->file.fd = file_fd;
-                                    buf->file.pos = 0;
-                                    buf->size = st.st_size;
-                                    buf->flags |= BUFFER_IN_FILE;
-                                    chrn_chain_push_buffer(ch, buf);
-                                }
-                                connection_chain_write(client, request, ch);
-                                charon_debug("found parsed request");
-                            }
-                        }
-                    }
-                }
-
-                if (connection_ended) {
-                    charon_info("client from %d disconnected", client->fd);
-                    close(client->fd);
-                }
+                c = (connection_t*) event->data.ptr;
+                c->on_request(server, c);
             }
         }
     }
 
-    // TODO: graceful shutdown
-    shutdown(server->socket, SHUT_RDWR);
+    list_foreach_safe(&server->clients, ptr, ptr_safe) {
+        c = list_data(ptr, connection_t, node);
+        close(c->fd);
+        chrn_conn_destroy(c);
+    }
+
+    charon_info("clients stopped");
+    http_handler_on_finish(server);
     close(server->socket);
+    charon_info("server stopped");
 }
 
 void stop_server(charon_server* server)
@@ -283,7 +254,6 @@ void sigint_handler(int sig)
 {
     charon_debug("Ctrl+C catched");
     stop_server(global_server);
-    exit(0);
 }
 
 charon_server* global_server;

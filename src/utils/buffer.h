@@ -5,37 +5,28 @@
 #include <string.h>
 
 #include "utils/list.h"
-#include "errdefs.h"
-
-enum {
-    BUFFER_IN_MEMORY = 1,
-    BUFFER_IN_FILE = 1 << 1,
-};
+#include "defs.h"
 
 struct buffer {
     struct list_node node;
 
-    int flags;
+    unsigned in_file:1;
+    unsigned in_memory:1;
+    unsigned owning:1;
 
+    char* start;
+    char* end;
+    char* last;
+    
+    int fd;
+    int pos;
     size_t size;
-
-    union {
-        struct {
-            void* start;
-        } memory;
-
-        struct {
-            size_t pos;
-            int fd;
-        } file;
-    };
 };
 
 static inline int buffer_init(struct buffer* buffer)
 {
+    memset(buffer, '\0', sizeof(struct buffer));
     buffer->node = LIST_NODE_EMPTY;
-    buffer->size = 0;
-    buffer->flags = 0;
     return CHARON_OK;
 }
 
@@ -49,6 +40,34 @@ static inline struct buffer* buffer_create()
     return buffer;
 }
 
-#define buffer_size(b) ((b)->size)
+static inline void buffer_destroy(struct buffer* buffer)
+{
+    if (buffer->owning) {
+        free(buffer->start);
+    }
+}
+
+#define buffer_size(b) ((b)->end - (b)->start)
+
+static inline void buffer_malloc(struct buffer* buf, size_t size)
+{
+    buf->start = malloc(size);
+    memset(buf->start, '\0', size);
+    buf->in_memory = 1;
+    buf->owning = 1;
+    buf->end = buf->start + size;
+    buf->last = buf->start;
+}
+
+static inline void buffer_clean(struct buffer* buf)
+{
+    memset(buf->start, '\0', buf->end - buf->start);
+    buf->last = buf->start;
+}
+
+#define buffer_in_file(buf) do { (buf)->in_file = 1; (buf)->in_memory = 0; } while (0)
+#define buffer_in_memory(buf) do { (buf)->in_file = 0; (buf)->in_memory = 1; } while (0)
+
+typedef struct buffer buffer_t;
 
 #endif

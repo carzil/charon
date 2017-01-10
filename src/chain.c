@@ -1,7 +1,7 @@
 #include "utils/list.h"
 #include "utils/logging.h"
 #include "chain.h"
-#include "errdefs.h"
+#include "defs.h"
 
 int chain_init(chain_t* chain)
 {
@@ -9,7 +9,7 @@ int chain_init(chain_t* chain)
     return CHARON_OK;
 }
 
-chain_t* chrn_chain_create()
+chain_t* chain_create()
 {
     chain_t* chain = (chain_t*) malloc(sizeof(chain_t));
     if (!chain) {
@@ -19,7 +19,12 @@ chain_t* chrn_chain_create()
     return chain;
 }
 
-void chrn_chain_push_buffer(chain_t* ch, struct buffer* buf)
+void chain_destroy(chain_t* chain)
+{
+
+}
+
+void chain_push_buffer(chain_t* ch, buffer_t* buf)
 {
     list_append(&ch->buffers, &buf->node);
 }

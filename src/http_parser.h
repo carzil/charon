@@ -1,5 +1,5 @@
-#ifndef _HTTP_PARSER_
-#define _HTTP_PARSER_
+#ifndef _HTTP_PARSER_H_
+#define _HTTP_PARSER_H_
 
 #include <stddef.h>
 
@@ -9,12 +9,18 @@
 #include "utils/string.h"
 #include "http.h"
 
-#define HTTP_PARSER_OK 0
-#define HTTP_PARSER_DONE_REQUEST 1
-#define HTTP_PARSER_BUFFER_OVERFLOW 2
-#define HTTP_PARSER_INVALID_METHOD 3
-#define HTTP_PARSER_INVALID_REQUEST 4
-#define HTTP_PARSER_NO_MEM 5
+enum {
+    HTTP_PARSER_OK = 0,
+    HTTP_PARSER_DONE_REQUEST = 1,
+    HTTP_PARSER_BUFFER_OVERFLOW = 2,
+    HTTP_PARSER_INVALID_METHOD = 3,
+    HTTP_PARSER_INVALID_REQUEST = 4,
+    HTTP_PARSER_NO_MEM = 5,
+    HTTP_PARSER_PASS = 6,
+    HTTP_PARSER_BODY_START = 7,
+    HTTP_PARSER_AGAIN = 8,
+    HTTP_PARSER_ERROR = 9,
+};
 
 typedef enum {
     st_method_start,
@@ -46,47 +52,17 @@ typedef enum {
     st_done
 } http_parser_state;
 
-typedef int http_method_t;
-typedef int http_status_t;
-
-struct http_request_s {
-    struct list_node node;
-
-    struct array buf;
-    int method;
-    http_uri_t uri;
-    http_version_t http_version;
-    http_body_t body;
-    struct vector headers; // vector of struct http_headers
-
-    int parsed; // TODO: request flags
-
-    http_response_t response; // for every 
+struct http_parser_s {
+    int pos;
+    http_parser_state state;
 };
 
 typedef struct http_parser_s http_parser_t;
-typedef struct http_request_s http_request_t;
-
-static inline const char* http_request_header_value(http_request_t* r, const char* header_name)
-{
-    for (size_t i = 0; i < vector_size(&r->headers); i++) {
-        http_header_t* header = vector_data(&r->headers, i, http_header_t);
-        if (!strcmp(header->name, header_name)) {
-            return header->value;
-        }
-    }
-    return NULL;
-}
-
-struct http_parser_s {
-    size_t pos;
-    http_parser_state state;
-    struct list request_queue;
-};
 
 void http_parser_init(http_parser_t* p);
 http_parser_t* http_parser_create();
-int http_parser_feed(http_parser_t* parser, char* buffer, size_t size);
-void http_parser_free();
+void http_parser_destroy(http_parser_t* parser);
+
+int http_parser_feed(http_parser_t* p, buffer_t* buf, http_request_t* request);
 
 #endif

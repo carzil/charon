@@ -3,7 +3,7 @@
 
 #include "utils/logging.h"
 #include "utils/array.h"
-#include "errdefs.h"
+#include "defs.h"
 
 /* TODO: vector_foreach macro */
 

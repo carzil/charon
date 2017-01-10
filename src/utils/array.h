@@ -5,7 +5,7 @@
 #include <string.h>
 #include <assert.h>
 
-#include "errdefs.h"
+#include "defs.h"
 #include "utils/logging.h"
 
 /*
@@ -44,11 +44,11 @@ static inline int array_ensure_capacity(struct array* array, size_t capacity)
         while (capacity > new_capacity) {
             new_capacity = 3 * new_capacity / 2;
         }
-        char* new_data = (char*) malloc(new_capacity);
-        charon_debug("reallocation done");
+        char* new_data = malloc(new_capacity);
         if (!new_data) {
             return -CHARON_NO_MEM;
         }
+        charon_debug("reallocation done");
         memcpy(new_data, array->data, array->size);
         free(array->data);
         array->data = new_data;
@@ -78,7 +78,6 @@ static inline void array_consume(struct array* array, size_t to_consume)
 static inline void array_destroy(struct array* array)
 {
     free(array->data);
-    free(array);
 }
 
 #define array_size(array) ((array)->size)

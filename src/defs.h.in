@@ -1,0 +1,13 @@
+#ifndef _CHARON_ERRORS_H_
+#define _CHARON_ERRORS_H_
+
+enum {
+    CHARON_OK = 0,
+    CHARON_ERR = 1,
+    CHARON_NO_MEM = 2,
+    CHARON_BUFFER_FULL = 3,
+};
+
+#define CHARON_VERSION "@charon_VERSION@"
+
+#endif

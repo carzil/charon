@@ -10,7 +10,9 @@ struct chain_s {
 
 typedef struct chain_s chain_t;
 
-chain_t* chrn_chain_create();
-void chrn_chain_push_buffer(chain_t* c, struct buffer* buf);
+int chain_init(chain_t* chain);
+chain_t* chain_create();
+void chain_push_buffer(chain_t* c, buffer_t* buf);
+void chain_destroy(chain_t* c);
 
 #endif

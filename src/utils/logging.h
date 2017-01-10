@@ -17,44 +17,46 @@ typedef enum {
 static inline void charon_log(loglevel_t lvl, const char* fmt, va_list args)
 {
     char buffer[4096];
-
     const char* lvl_string;
+    size_t lvl_string_size;
+    size_t offset;
 
     switch (lvl) {
         case DEBUG:
             lvl_string = "[DEBUG] ";
+            lvl_string_size = 8;
             break;
         case INFO:
             lvl_string = "[INFO] ";
+            lvl_string_size = 7;
             break;
         case ERROR:
             lvl_string = "[ERROR] ";
+            lvl_string_size = 8;
             break;
         case PERROR:
             lvl_string = "[ERROR] ";
+            lvl_string_size = 8;
             break;
     }
 
-    char new_fmt[4096];
+    strcpy(buffer, lvl_string);
+    offset = lvl_string_size;
+    int count = vsnprintf(buffer + offset, 4096 - offset, fmt, args);
 
-    memcpy(new_fmt, lvl_string, strlen(lvl_string));
-    size_t fmt_size = strlen(lvl_string);
-    memcpy(new_fmt + fmt_size, fmt, strlen(fmt));
-    fmt_size += strlen(fmt);
+    if (count == -1) {
+        /* TODO: handle error */
+        return;
+    }
+
+    offset += count;
     if (lvl == PERROR) {
         char* error = strerror(errno);
-        size_t error_len = strlen(error);
-        memcpy(new_fmt + fmt_size, error, error_len);
-        fmt_size += error_len;
+        strcpy(buffer + offset, error);
+        offset += strlen(error);
     }
-    memcpy(new_fmt + fmt_size, "\n", 1);
-    new_fmt[fmt_size + 1] = '\0';
-    fmt = (const char*)&new_fmt;
-
-
-    size_t len = vsnprintf(buffer, 4096, fmt, args);
-
-    write(2, buffer, len);
+    buffer[offset++] = '\n';
+    write(2, buffer, offset);
 }
 
 #ifdef CHARON_DEBUG
