@@ -10,7 +10,8 @@ enum {
     CHARON_AGAIN = 5
 };
 
-#define CHARON_VERSION "@charon_VERSION@"
+#define CHARON_COMMIT_HASH "@GIT_COMMIT_HASH@"
+#define CHARON_VERSION "@charon_VERSION@-" CHARON_COMMIT_HASH
 
 typedef unsigned long long msec_t;
 
