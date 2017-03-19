@@ -31,7 +31,6 @@ set(SOURCE_FILES
     src/server.c
     src/http/vhost.c
     src/timer.c
-    src/rbtree.c
 )
 
 add_executable(charon src/main.c ${SOURCE_FILES})
