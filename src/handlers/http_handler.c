@@ -109,9 +109,9 @@ void http_handler_make_response(worker_t* s, connection_t* c)
     buf = make_headers(resp);
     chain_push_buffer(&c->chain, buf);
     chain_push_buffer(&c->chain, resp->body_buf);
-    worker_schedule_write(s, c);
     buffer_clean(&ctx->req_buf);
     http_parser_init(&ctx->parser);
+    worker_schedule_write(s, c);
 }
 
 void http_handler_on_request_body(worker_t* s, connection_t* c)
@@ -159,13 +159,17 @@ void http_handler_on_request(worker_t* s, connection_t* c)
     }
 
     count = conn_read(c, &ctx->req_buf);
-    if (count < 0 || c->eof) {
+    if (count < 0) {
         if (count == -CHARON_BUFFER_FULL) {
             charon_debug("client sent too big request (addr=%s)", c->hbuf);
         }
         worker_stop_connection(s, c);
         return;
+    } else if (count == 0 && c->eof) {
+        worker_stop_connection(s, c);
+        return;
     }
+
     charon_debug("readed %d bytes from fd=%d", count, c->fd);
     charon_debug("content:\n===== [ request dump ] =====\n%*s===== [ request dump ] =====", (int)(ctx->req_buf.last - ctx->req_buf.start), ctx->req_buf.start);
     res = http_parser_feed(&ctx->parser, &ctx->req_buf, &ctx->request);
@@ -173,7 +177,7 @@ void http_handler_on_request(worker_t* s, connection_t* c)
         worker_stop_connection(s, c);
         return;
     } else if (res == HTTP_PARSER_BODY_START) {
-        charon_debug("readed request, method=%d, http version=%d.%d, path='%.*s'",
+        charon_info("readed request, method=%d, http version=%d.%d, path='%.*s'",
             ctx->request.method,
             ctx->request.http_version.major,
             ctx->request.http_version.minor,
@@ -184,11 +188,6 @@ void http_handler_on_request(worker_t* s, connection_t* c)
         http_handler_on_request_body(s, c);
     }
 
-
-    if (c->eof) {
-        worker_stop_connection(s, c);
-        return;
-    }
     timer_queue_update(&s->timer_queue, c->timeout_event, get_current_msec() + 5 * 5000);
 }
 
