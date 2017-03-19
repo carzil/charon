@@ -306,16 +306,21 @@ int config_parse(config_state_t* st)
 int config_open(char* filename, config_t** conf)
 {
     config_state_t st;
+    int res = CHARON_OK;
 
     config_state_init(&st);
     st.fd = open(filename, O_RDONLY);
     if (st.fd < 0) {
         charon_perror("open: ");
-        return -CHARON_ERR;
+        res = -CHARON_ERR;
+        goto cleanup;
     }
 
     *conf = st.conf = config_create();
-    int res = config_parse(&st);
+    res = config_parse(&st);
+
+cleanup:
+    close(st.fd);
     config_state_destroy(&st);
     return res;
 }
