@@ -5,7 +5,7 @@
 #include "utils/buffer.h"
 
 struct chain_s {
-    struct list buffers;
+    LIST_HEAD_DECLARE(buffers);
 };
 
 typedef struct chain_s chain_t;

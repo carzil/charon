@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 #include <string.h>
+#include <stdlib.h>
+#include <unistd.h>
 
 #include "utils/list.h"
 #include "defs.h"
@@ -17,16 +19,15 @@ struct buffer {
     char* start;
     char* end;
     char* last;
-    
+
     int fd;
-    int pos;
+    size_t pos;
     size_t size;
 };
 
 static inline int buffer_init(struct buffer* buffer)
 {
     memset(buffer, '\0', sizeof(struct buffer));
-    buffer->node = LIST_NODE_EMPTY;
     return CHARON_OK;
 }
 
@@ -43,7 +44,11 @@ static inline struct buffer* buffer_create()
 static inline void buffer_destroy(struct buffer* buffer)
 {
     if (buffer->owning) {
-        free(buffer->start);
+        if (buffer->in_memory) {
+            free(buffer->start);
+        } else if (buffer->in_file) {
+            close(buffer->fd);
+        }
     }
 }
 

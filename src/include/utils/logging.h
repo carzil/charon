@@ -61,7 +61,7 @@ static inline void charon_log(loglevel_t lvl, const char* fmt, va_list args)
 
 #ifdef CHARON_DEBUG
 
-static inline void charon_debug(const char* fmt, ...)
+__attribute__((format(__printf__, 1, 2))) static inline void charon_debug(const char* fmt, ...)
 {
     va_list args;
     va_start(args, fmt);
@@ -75,7 +75,7 @@ static inline void charon_debug(const char* fmt, ...)
 
 #endif
 
-static inline void charon_info(const char* fmt, ...)
+__attribute__((format(__printf__, 1, 2))) static inline void charon_info(const char* fmt, ...)
 {
     va_list args;
     va_start(args, fmt);
@@ -83,7 +83,7 @@ static inline void charon_info(const char* fmt, ...)
     va_end(args);
 }
 
-static inline void charon_error(const char* fmt, ...)
+__attribute__((format(__printf__, 1, 2))) static inline void charon_error(const char* fmt, ...)
 {
     va_list args;
     va_start(args, fmt);
@@ -91,7 +91,7 @@ static inline void charon_error(const char* fmt, ...)
     va_end(args);
 }
 
-static inline void charon_perror(const char* fmt, ...)
+__attribute__((format(__printf__, 1, 2))) static inline void charon_perror(const char* fmt, ...)
 {
     va_list args;
     va_start(args, fmt);

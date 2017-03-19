@@ -29,6 +29,7 @@ static inline struct vector* __vector_create(size_t type_size, size_t initial_si
         return NULL;
     }
     __vector_init(v, type_size, initial_size);
+    return v;
 }
 
 static inline int __vector_push(struct vector* v, size_t type_size, char* mem)
@@ -41,10 +42,17 @@ static inline int __vector_push(struct vector* v, size_t type_size, char* mem)
     return CHARON_OK;
 }
 
+static inline void vector_destroy(struct vector* v)
+{
+    array_destroy(&v->buf);
+}
+
 #define vector_data(v, idx, type) (type*)(array_data(&(v)->buf) + (idx) * sizeof(type))
 #define vector_push(v, ptr, type) __vector_push(v, sizeof(type), (char*)ptr)
 #define vector_size(v) ((v)->size)
 #define vector_init(v, type, sz) __vector_init(v, sizeof(type), sz)
 #define vector_create(type, sz) __vector_create(sizeof(type), sz)
+
+typedef struct vector vector_t;
 
 #endif

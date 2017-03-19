@@ -6,8 +6,14 @@ enum {
     CHARON_ERR = 1,
     CHARON_NO_MEM = 2,
     CHARON_BUFFER_FULL = 3,
+    CHARON_EOF = 4,
+    CHARON_AGAIN = 5
 };
 
 #define CHARON_VERSION "@charon_VERSION@"
+
+typedef unsigned long long msec_t;
+
+#define UNUSED __attribute__ ((unused))
 
 #endif

@@ -5,44 +5,62 @@
 #include "chain.h"
 #include "utils/array.h"
 
-connection_t* chrn_conn_create()
+connection_t* conn_create()
 {
     connection_t* c = malloc(sizeof(connection_t));
     chain_init(&c->chain);
     return c;
 }
 
-void chrn_conn_destroy(connection_t* c)
+void conn_destroy(connection_t* c)
 {
     chain_destroy(&c->chain);
 }
 
-int chrn_conn_write(connection_t* client, chain_t* chain)
+int conn_write(connection_t* client, chain_t* chain)
 {
-    struct list_node* ptr;
     off_t offset;
-    list_foreach(&chain->buffers, ptr) {
-        buffer_t* buf = list_data(ptr, buffer_t, node);
+
+    while (!list_empty(&chain->buffers)) {
+        buffer_t* buf = list_first_entry(chain->buffers, buffer_t, node);
         if (buf->in_memory) {
-            int count = write(client->fd, buf->start, buf->size);
+            int count = write(client->fd, buf->start + buf->pos, buf->size);
             if (count < 0) {
-                charon_perror("write: ");
+                switch (errno) {
+                case EAGAIN:
+                    return CHARON_AGAIN;
+                default:
+                    charon_perror("write: ");
+                    return -CHARON_ERR;
+                }
             } else {
+                buf->pos += count;
                 charon_debug("write to client fd=%d, count=%d", client->fd, count);
             }
         } else if (buf->in_file) {
             offset = buf->pos;
-            sendfile(client->fd, buf->fd, &offset, buf->size);
-            charon_debug("sendfile to client fd=%d, from fd=%d, count=%d", client->fd, buf->fd, offset);
-            if (offset < 0) {
+            int res = sendfile(client->fd, buf->fd, &offset, buf->size);
+            charon_debug("sendfile to client fd=%d, from fd=%d, count=%jd", client->fd, buf->fd, (intmax_t)offset);
+            if (res < 0) {
                 charon_perror("sendfile: ");
+                return -CHARON_ERR;
             }
+            buf->pos += offset;
+        }
+
+        if (buf->pos == buf->size) {
+            charon_debug("buffer done, client fd=%d", client->fd);
+            list_remove(&buf->node);
+            buffer_destroy(buf);
+            free(buf);
         }
     }
+    chain_destroy(&client->chain);
+    charon_debug("all buffers done, client fd=%d", client->fd);
     return CHARON_OK;
 }
 
-int charon_conn_read(connection_t* c, buffer_t* buf)
+int conn_read(connection_t* c, buffer_t* buf)
 {
     int sum = 0, count;
     size_t avail_space;

@@ -1,41 +1,88 @@
+#include <getopt.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "conf.h"
 #include "server.h"
+#include "utils/list.h"
+#include "timer.h"
+#include "defs.h"
+
+worker_t* global_server;
 
 void usage()
 {
-    fprintf(stderr, "Usage: charon port\n");
-    exit(0);
+    fprintf(stderr, "Usage: charon -c file PORT\n");
 }
 
-struct my_data {
-    struct list_node node;
+void sigint_handler(UNUSED int sig)
+{
+    charon_debug("Ctrl+C catched");
+    worker_stop(global_server);
+}
 
-    int a;
-    char c;
-    short b;
+static struct option charon_options[] = {
+    { "config", required_argument, NULL, 'c' },
+    { NULL, 0, NULL, 0 }
 };
 
-int main(int argc, char *argv[])
+int main(int argc, char* argv[])
 {
-    // struct list l;
-    // list_init(&l);
-    // struct my_data arr[10];
+    int option_index = 0, res, c;
+    char* config_name = NULL;
 
-    // for (size_t i = 0; i < 10; i++) {
-    //     arr[i].a = 100 * i;
-    //     arr[i].c = '0' + i;
-    //     arr[i].b = 42 + i;
-    //     list_append(&l, &arr[i].node);
-    // }
+    for (;;) {
+        c = getopt_long(argc, argv, "c:", charon_options, &option_index);
 
-    // list_foreach(l, ptr) {
-    //     struct my_data* data = list_data(ptr, struct my_data);
-    //     charon_debug("%d %c %d", data->a, data->c, data->b);
-    // }
-    argv += 1;
-    argc -= 1;
-    return server_main(argc, argv);
+        if (c == -1) {
+            break;
+        }
+
+        switch (c) {
+        case 'c':
+            config_name = optarg;
+            break;
+        default:
+            charon_debug("%c", c);
+            return 1;
+        }
+    }
+
+    if (config_name == NULL) {
+        fprintf(stderr, "charon: no config file provided\n");
+        return 1;
+    }
+
+    if (optind >= argc) {
+        fprintf(stderr, "charon: no port provided\n");
+        return 1;
+    }
+
+    config_t* config = NULL;
+
+    res = config_open(config_name, &config);
+
+    if (res == CHARON_OK) {
+        struct list_node* ptr;
+        list_foreach(&config->vhosts, ptr) {
+            charon_debug("vhost name '%s'", list_entry(ptr, vhost_t, lnode)->name.start);
+        }
+    }
+
+    signal(SIGINT, sigint_handler);
+
+    global_server = worker_create(config);
+    if (worker_start(global_server, atoi(argv[optind])) == 0) {
+        worker_loop(global_server);
+    } else {
+        charon_error("cannot start charon server");
+    }
+
+    worker_destroy(global_server);
+
+    config_destroy(config);
+    free(config);
+    return 0;
 }

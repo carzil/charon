@@ -13,7 +13,7 @@ typedef struct string string_t;
 
 #define STRING_EMPTY (string_t) { NULL, NULL }
 
-#define string_size(s) ((s)->end - (s)->start)
+#define string_size(s) ((size_t)((s)->end - (s)->start))
 
 /* Copies string of given size from raw buffer and puts a '\0' to the end. */
 static inline char* copy_string_z(char* buf, size_t size)

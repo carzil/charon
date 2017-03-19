@@ -96,7 +96,7 @@ int http_parser_feed(http_parser_t* p, buffer_t* buf, http_request_t* request) {
         case st_uri_path:
             if (ch == ' ') {
                 request->uri.path.end = buf_ptr;
-                charon_debug("hp_parser: parsed uri: '%.*s'", string_size(&request->uri.path), request->uri.path.start);
+                charon_debug("hp_parser: parsed uri: '%.*s'", (int)string_size(&request->uri.path), request->uri.path.start);
                 charon_debug("hp_state: st_uri_host -> st_http_version_spaces");
                 p->state = st_spaces_http_version;
             }
@@ -224,7 +224,7 @@ int http_parser_feed(http_parser_t* p, buffer_t* buf, http_request_t* request) {
 
         case st_header_end:
             if (ch == '\n') {
-                charon_debug("read header name='%.*s' value='%.*s'", string_size(&header.name), header.name.start, string_size(&header.value), header.value.start);
+                charon_debug("read header name='%.*s' value='%.*s'", (int)string_size(&header.name), header.name.start, (int)string_size(&header.value), header.value.start);
                 charon_debug("hp_state: st_header_end -> st_header_start");
                 p->pos++;
                 p->state = st_header_start;
@@ -265,7 +265,7 @@ int http_parser_feed(http_parser_t* p, buffer_t* buf, http_request_t* request) {
     return HTTP_PARSER_AGAIN;
 }
 
-void http_parser_destroy(http_parser_t* parser)
+void http_parser_destroy(UNUSED http_parser_t* parser)
 {
 
 }

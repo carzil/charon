@@ -10,8 +10,9 @@
 #include "utils/list.h"
 #include "http.h"
 #include "chain.h"
+#include "event.h"
 
-struct charon_server_s;
+struct worker_s;
 
 struct connection_s {
     struct list_node node;
@@ -27,14 +28,17 @@ struct connection_s {
     chain_t chain;
 
     void* context;
-    void (*on_request)(struct charon_server_s* s, struct connection_s* c);
+    void (*on_request)(struct worker_s* s, struct connection_s* c);
+    int (*on_event)(struct worker_s* s, struct connection_s* c, event_t* ev);
+
+    event_t* timeout_event;
 };
 
 typedef struct connection_s connection_t;
 
-connection_t* chrn_conn_create();
-int chrn_conn_write(connection_t* c, chain_t* chain);
-void chrn_conn_destroy(connection_t* c);
-int charon_conn_read(connection_t* c, buffer_t* buf);
+connection_t* conn_create();
+int conn_write(connection_t* c, chain_t* chain);
+void conn_destroy(connection_t* c);
+int conn_read(connection_t* c, buffer_t* buf);
 
 #endif

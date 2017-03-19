@@ -9,34 +9,39 @@
 #include <string.h>
 #include <sys/epoll.h>
 #include <sys/socket.h>
-#include <sys/types.h> 
+#include <sys/types.h>
 #include <unistd.h>
 #include <sys/stat.h>
 
 #include "server.h"
 #include "client.h"
-#include "http_handler.h"
+#include "handlers/http_handler.h"
 #include "utils/logging.h"
 #include "utils/string.h"
 
-/* TODO: now it's possible to perform a DoS attack on Charon:
+/*
+ * TODO: now it's possible to perform a DoS attack on Charon:
  * hacker can open tons of HTTP-connections and Charon will not
  * close them. Need to create a mechanism to close
  * timed out connections.
  */
 
-charon_server* create_server()
+worker_t* worker_create(config_t* conf)
 {
-    charon_server* server = (charon_server*) malloc(sizeof(charon_server));
-    memset(server, '\0', sizeof(charon_server));
-    server->socket = -1;
-    server->is_running = 0;
-    return server;
+    worker_t* worker = (worker_t*) malloc(sizeof(worker_t));
+    memset(worker, '\0', sizeof(worker_t));
+    worker->socket = -1;
+    worker->is_running = 0;
+    worker->conf = conf;
+    LIST_HEAD_INIT(worker->clients);
+    timer_queue_init(&worker->timer_queue);
+    return worker;
 }
 
-void destroy_server(charon_server* server)
+void worker_destroy(worker_t* worker)
 {
-    free(server);
+    timer_queue_destroy(&worker->timer_queue);
+    free(worker);
 }
 
 int set_fd_non_blocking(int fd)
@@ -55,7 +60,7 @@ int set_fd_non_blocking(int fd)
     return 0;
 }
 
-int start_server(charon_server* server, int port)
+int worker_start(worker_t* worker, int port)
 {
     struct addrinfo hints;
     struct addrinfo* result;
@@ -76,22 +81,22 @@ int start_server(charon_server* server, int port)
     }
 
     for (struct addrinfo* rp = result; rp; rp = rp->ai_next) {
-        server->socket = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+        worker->socket = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
 
-        if (server->socket != -1) {
-            res = bind(server->socket, rp->ai_addr, rp->ai_addrlen);
+        if (worker->socket != -1) {
+            res = bind(worker->socket, rp->ai_addr, rp->ai_addrlen);
             if (res == 0) {
-                charon_info("charon running on %s:%d", inet_ntoa(server->addr.sin_addr), port);
+                charon_info("charon running on %s:%d", inet_ntoa(worker->addr.sin_addr), port);
                 break;
             } else {
-                close(server->socket);
+                close(worker->socket);
             }
         }
     }
 
     freeaddrinfo(result);
 
-    if (server->socket < 0) {
+    if (worker->socket < 0) {
         charon_perror("socket: ");
         return 2;
     }
@@ -102,179 +107,230 @@ int start_server(charon_server* server, int port)
     }
 
     int enable = 1;
-    if (setsockopt(server->socket, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int)) < 0) {
+    if (setsockopt(worker->socket, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int)) < 0) {
         charon_perror("setsockopt: ");
     }
 
-    if (set_fd_non_blocking(server->socket) == -1) {
+    if (set_fd_non_blocking(worker->socket) == -1) {
         charon_perror("cannot set socket to non-blocking mode: ");
         return 3;
     }
 
-    if (listen(server->socket, SOMAXCONN) == -1) {
+    if (listen(worker->socket, SOMAXCONN) == -1) {
         charon_perror("listen: ");
-    }   
+    }
 
     // epoll preparation
-    server->epoll_fd = epoll_create1(0);
-    if (server->epoll_fd == -1) {
+    worker->epoll_fd = epoll_create1(0);
+    if (worker->epoll_fd == -1) {
         charon_perror("epoll_create: ");
         return 4;
     }
 
     struct epoll_event ctl_event;
-    ctl_event.data.fd = server->socket;
+    ctl_event.data.fd = worker->socket;
     ctl_event.events = EPOLLIN | EPOLLET;
 
-    res = epoll_ctl(server->epoll_fd, EPOLL_CTL_ADD, server->socket, &ctl_event);
+    res = epoll_ctl(worker->epoll_fd, EPOLL_CTL_ADD, worker->socket, &ctl_event);
     if (res == -1) {
         charon_perror("epoll_ctl: ");
         return 4;
     }
 
-    server->is_running = true;
+    worker->is_running = true;
 
     return 0;
 }
 
-connection_t* server_client_create(charon_server* server)
+connection_t* worker_client_create(worker_t* worker)
 {
-    connection_t* client = chrn_conn_create();
-    client->node = LIST_NODE_EMPTY;
-    list_append(&server->clients, &client->node);
+    connection_t* client = conn_create();
+    list_insert_last(&worker->clients, &client->node);
     return client;
 }
 
-int chrn_server_accept_client(charon_server* server, connection_t** result)
+int worker_accept_client(worker_t* worker, connection_t** result)
 {
     struct epoll_event ctl_event;
-    connection_t* client = server_client_create(server);
+    connection_t* client;
     socklen_t in_addr_len = sizeof(struct sockaddr);
+    struct sockaddr addr;
     int error;
 
-    int new_fd = accept(server->socket, &client->addr, &in_addr_len);
-    if (new_fd == -1) {
-        charon_perror("accept: ");
-        error = -CHARON_ERR;
-        goto cleanup;
-    }
-    if (set_fd_non_blocking(new_fd) == -1) {
-        charon_perror("cannot set fd to non-blocking mode: ");
-        error = -CHARON_ERR;
-        goto cleanup;
+    int new_fd = accept(worker->socket, &addr, &in_addr_len);
+
+    if (new_fd < 0) {
+        switch (errno) {
+        case EAGAIN:
+            return -CHARON_AGAIN;
+        default:
+            charon_perror("accept: ");
+            return -CHARON_ERR;
+        }
     }
 
-    memset(&ctl_event, 0, sizeof(ctl_event));
+    if (set_fd_non_blocking(new_fd) < 0) {
+        charon_perror("cannot set fd to non-blocking mode: ");
+        return -CHARON_ERR;
+    }
+
+    client = worker_client_create(worker);
+    memcpy(&client->addr, &addr, in_addr_len);
+
     client->fd = new_fd;
     ctl_event.data.ptr = client;
     ctl_event.events = EPOLLIN | EPOLLET;
 
-    if (epoll_ctl(server->epoll_fd, EPOLL_CTL_ADD, new_fd, &ctl_event) == -1) {
+    if (epoll_ctl(worker->epoll_fd, EPOLL_CTL_ADD, new_fd, &ctl_event) < 0) {
         charon_perror("epoll_ctl: ");
         error = -CHARON_ERR;
         goto cleanup;
     }
 
-    if (getnameinfo(&client->addr, in_addr_len,
+    if (!getnameinfo(&client->addr, in_addr_len,
                     client->hbuf, sizeof(client->hbuf),
                     client->sbuf, sizeof(client->sbuf),
-                    NI_NUMERICHOST | NI_NUMERICSERV) == 0) {
+                    NI_NUMERICHOST | NI_NUMERICSERV)) {
         charon_info("accepted client from %s:%s (fd=%d)", client->hbuf, client->sbuf, new_fd);
     }
 
     *result = client;
     return CHARON_OK;
 
-    cleanup:
-    chrn_conn_destroy(client);
+cleanup:
+    conn_destroy(client);
     free(client);
     return error;
 }
 
-void charon_server_end_conn(charon_server* server, connection_t* c)
+void worker_schedule_write(worker_t* worker, connection_t* c)
+{
+    struct epoll_event ctl_event;
+    memset(&ctl_event, 0, sizeof(ctl_event));
+    ctl_event.data.ptr = c;
+    ctl_event.events = EPOLLIN | EPOLLOUT | EPOLLET;
+    if (epoll_ctl(worker->epoll_fd, EPOLL_CTL_MOD, c->fd, &ctl_event) < 0) {
+        charon_perror("epoll_ctl: ");
+    }
+    charon_debug("connection was scheduled for write (fd=%d)", c->fd);
+}
+
+void worker_unschedule_write(worker_t* worker, connection_t* c)
+{
+    struct epoll_event ctl_event;
+    memset(&ctl_event, 0, sizeof(ctl_event));
+    ctl_event.data.ptr = c;
+    ctl_event.events = EPOLLIN | EPOLLET;
+    if (epoll_ctl(worker->epoll_fd, EPOLL_CTL_MOD, c->fd, &ctl_event) < 0) {
+        charon_perror("epoll_ctl: ");
+    }
+    charon_debug("connection was unscheduled for write (fd=%d)", c->fd);
+}
+
+void worker_stop_connection(worker_t* worker, connection_t* c)
 {
     charon_info("connection closed fd=%d, addr=%s:%s", c->fd, c->hbuf, c->sbuf);
-    http_handler_on_connection_end(server, c);
+    http_handler_on_connection_end(worker, c);
+    timer_queue_remove(&worker->timer_queue, c->timeout_event);
+    event_destroy(c->timeout_event);
+    free(c->timeout_event);
+    list_remove(&c->node);
     close(c->fd);
-    list_remove(&server->clients, &c->node);
-    chrn_conn_destroy(c);
+    conn_destroy(c);
     free(c);
 }
 
-void server_loop(charon_server* server)
+int worker_accept_connections(worker_t* worker)
 {
-    struct epoll_event events[MAX_EVENTS];
-    struct epoll_event* event;
+    connection_t* c = NULL;
+    int res, cnt = 0;
+    while ((res = worker_accept_client(worker, &c)) == CHARON_OK) {
+        http_handler_connection_init(worker, c);
+        cnt++;
+    }
+    return cnt;
+}
+
+void worker_finish(worker_t* worker)
+{
     struct list_node* ptr;
     struct list_node* ptr_safe;
     connection_t* c;
-    int events_count;
 
-    charon_info("started server loop");
-    while (server->is_running) {
-        events_count = epoll_wait(server->epoll_fd, events, MAX_EVENTS, -1);
+    list_foreach_safe(&worker->clients, ptr, ptr_safe) {
+        c = list_entry(ptr, connection_t, node);
+        close(c->fd);
+        conn_destroy(c);
+    }
 
-        if (events_count == -1) {
+    charon_info("clients stopped");
+    http_handler_on_finish(worker);
+    close(worker->socket);
+    charon_info("worker stopped");
+}
+
+void worker_loop(worker_t* worker)
+{
+    struct epoll_event events[MAX_EVENTS];
+    struct epoll_event* epoll_event;
+    connection_t* c;
+    int events_count, res;
+
+    charon_info("started worker loop");
+    while (worker->is_running) {
+        msec_t timeout = -1;
+        if (!timer_queue_empty(&worker->timer_queue)) {
+            timeout = timer_queue_top(&worker->timer_queue)->expire - get_current_msec();
+        }
+        events_count = epoll_wait(worker->epoll_fd, events, MAX_EVENTS, (int)timeout);
+
+        if (events_count < 0) {
             charon_perror("epoll_wait: ");
-            server->is_running = false;
+            worker->is_running = false;
             break;
         }
 
         charon_debug("%d events in queue", events_count);
         for (int i = 0; i < events_count; i++) {
-            event = events + i;
-            if (event->data.fd == server->socket) {
-                chrn_server_accept_client(server, &c);
-                http_handler_connection_init(c);
+            epoll_event = events + i;
+            c = (connection_t*) epoll_event->data.ptr;
+            if (epoll_event->data.fd == worker->socket) {
+                worker_accept_connections(worker);
             } else {
-                c = (connection_t*) event->data.ptr;
-                c->on_request(server, c);
+                if (epoll_event->events & EPOLLIN) {
+                    charon_debug("read event on fd=%d", c->fd);
+                    c->on_request(worker, c);
+                }
+
+                if (epoll_event->events & EPOLLOUT) {
+                    charon_debug("write event on fd=%d", c->fd);
+                    res = conn_write(c, &c->chain);
+                    if (res == CHARON_OK) {
+                        worker_unschedule_write(worker, c);
+                    }
+                }
             }
         }
+
+        msec_t c_time = get_current_msec();
+        event_t* ev;
+        charon_debug("processing timeouts");
+        while (!timer_queue_empty(&worker->timer_queue) &&
+            (ev = timer_queue_top(&worker->timer_queue))->expire <= c_time) {
+            if (ev->conn->on_event != NULL) {
+                charon_debug("event on connection fd=%d", ev->conn->fd);
+                if (ev->conn->on_event(worker, ev->conn, ev)) {
+                    timer_queue_remove(&worker->timer_queue, ev);
+                }
+            }
+        }
+        charon_debug("event loop end");
     }
 
-    list_foreach_safe(&server->clients, ptr, ptr_safe) {
-        c = list_data(ptr, connection_t, node);
-        close(c->fd);
-        chrn_conn_destroy(c);
-    }
-
-    charon_info("clients stopped");
-    http_handler_on_finish(server);
-    close(server->socket);
-    charon_info("server stopped");
+    worker_finish(worker);
 }
 
-void stop_server(charon_server* server)
+void worker_stop(worker_t* worker)
 {
-    server->is_running = false;
-}
-
-void sigint_handler(int sig)
-{
-    charon_debug("Ctrl+C catched");
-    stop_server(global_server);
-}
-
-charon_server* global_server;
-
-int server_main(int argc, char *argv[])
-{
-    if (argc < 1) {
-        charon_error("no port provided");
-        return 1;
-    }
-
-    signal(SIGINT, sigint_handler);
-
-    global_server = create_server();
-    if (start_server(global_server, atoi(argv[0])) == 0) {
-        server_loop(global_server);
-    } else {
-        charon_error("cannot start charon server");
-    }
-
-    destroy_server(global_server);
-
-    return 0;
+    worker->is_running = false;
 }

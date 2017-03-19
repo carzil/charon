@@ -5,7 +5,7 @@
 
 int chain_init(chain_t* chain)
 {
-    chain->buffers = LIST_EMPTY;
+    LIST_HEAD_INIT(chain->buffers);
     return CHARON_OK;
 }
 
@@ -19,12 +19,12 @@ chain_t* chain_create()
     return chain;
 }
 
-void chain_destroy(chain_t* chain)
+void chain_destroy(UNUSED chain_t* chain)
 {
 
 }
 
 void chain_push_buffer(chain_t* ch, buffer_t* buf)
 {
-    list_append(&ch->buffers, &buf->node);
+    list_insert_last(&ch->buffers, &buf->node);
 }

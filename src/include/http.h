@@ -79,17 +79,40 @@ struct http_response_s {
     int status;
     char* status_message;
     http_version_t http_version;
-    buffer_t body_buf;
+    buffer_t* body_buf;
     struct http_headers_container_s headers;
 };
 
 typedef struct http_request_s http_request_t;
 typedef struct http_response_s http_response_t;
 
-void http_request_init(http_request_t* resp);
-void http_request_destroy(http_request_t* req);
-void http_response_init(http_response_t* resp);
-void http_response_destroy(http_response_t* resp);
+static inline void http_headers_container_destroy(http_headers_container_t* container)
+{
+    vector_destroy(&container->extra);
+}
+
+static inline void http_request_init(http_request_t* req)
+{
+    req->headers.content_length = 0;
+}
+
+static inline void http_request_destroy(UNUSED http_request_t* req)
+{
+    chain_destroy(&req->body);
+    http_headers_container_destroy(&req->headers);
+}
+
+static inline void http_response_init(http_response_t* resp)
+{
+    resp->headers.content_length = 0;
+}
+
+static inline void http_response_destroy(UNUSED http_response_t* resp)
+{
+
+}
+
+
 
 #define http_response_set_status(resp, st) do { (resp)->status = st; (resp)->status_message = st##_MSG; } while (0);
 

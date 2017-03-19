@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+#include <memory.h>
 
 #include "defs.h"
 #include "utils/logging.h"
@@ -38,8 +39,8 @@ static inline struct array* array_create(size_t capacity)
 
 static inline int array_ensure_capacity(struct array* array, size_t capacity)
 {
-    charon_debug("ensure capacity: have %d bytes, requested %d bytes", array->capacity, capacity);
     if (capacity > array->capacity) {
+        charon_debug("ensure capacity: have %zu bytes, requested %zu bytes", array->capacity, capacity);
         size_t new_capacity = array->capacity;
         while (capacity > new_capacity) {
             new_capacity = 3 * new_capacity / 2;
@@ -48,7 +49,6 @@ static inline int array_ensure_capacity(struct array* array, size_t capacity)
         if (!new_data) {
             return -CHARON_NO_MEM;
         }
-        charon_debug("reallocation done");
         memcpy(new_data, array->data, array->size);
         free(array->data);
         array->data = new_data;
@@ -79,6 +79,13 @@ static inline void array_destroy(struct array* array)
 {
     free(array->data);
 }
+
+static inline void array_clean(struct array* array)
+{
+    array->size = 0;
+}
+
+typedef struct array array_t;
 
 #define array_size(array) ((array)->size)
 #define array_capacity(array) ((array)->capacity)
