@@ -5,7 +5,7 @@
 #include "utils/list.h"
 #include "defs.h"
 
-typedef struct connection_s connection_t;
+struct connection_s;
 
 typedef enum {
     EV_TIMEOUT,
@@ -14,14 +14,14 @@ typedef enum {
 struct event_s {
     size_t timer_queue_idx;
 
-    connection_t* conn;
+    struct connection_s* conn;
     event_type_t type;
     msec_t expire;
 };
 
 typedef struct event_s event_t;
 
-inline static event_t* event_create(connection_t* c, event_type_t type)
+inline static event_t* event_create(struct connection_s* c, event_type_t type)
 {
     event_t* ev = malloc(sizeof(event_t));
     if (ev == NULL) {

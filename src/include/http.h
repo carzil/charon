@@ -29,6 +29,7 @@ typedef struct http_uri_s http_uri_t;
 typedef struct http_header_s http_header_t;
 typedef struct http_headers_container_s http_headers_container_t;
 typedef struct http_response_s http_response_t;
+typedef struct http_request_s http_request_t;
 
 struct http_version_s {
     int major;
@@ -83,9 +84,6 @@ struct http_response_s {
     struct http_headers_container_s headers;
 };
 
-typedef struct http_request_s http_request_t;
-typedef struct http_response_s http_response_t;
-
 static inline void http_headers_container_destroy(http_headers_container_t* container)
 {
     vector_destroy(&container->extra);
@@ -111,8 +109,6 @@ static inline void http_response_destroy(UNUSED http_response_t* resp)
 {
 
 }
-
-
 
 #define http_response_set_status(resp, st) do { (resp)->status = st; (resp)->status_message = st##_MSG; } while (0);
 

@@ -39,7 +39,7 @@ typedef struct {
     int pos;
     int size;
     char buf[4096];
-    int eof:1;
+    unsigned eof:1;
     char quote;
 
     int line;

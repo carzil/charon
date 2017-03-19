@@ -23,7 +23,7 @@ struct connection_s {
     char hbuf[NI_MAXHOST];
     char sbuf[NI_MAXSERV];
 
-    int eof:1;
+    unsigned eof:1;
 
     chain_t chain;
 
