@@ -65,22 +65,19 @@ int main(int argc, char* argv[])
     res = config_open(config_name, &config);
 
     if (res == CHARON_OK) {
-        struct list_node* ptr;
-        list_foreach(&config->vhosts, ptr) {
-            charon_debug("vhost name '%s'", list_entry(ptr, vhost_t, lnode)->name.start);
+        signal(SIGINT, sigint_handler);
+
+        global_server = worker_create(config);
+        if (worker_start(global_server, atoi(argv[optind])) == 0) {
+            worker_loop(global_server);
+        } else {
+            charon_error("cannot start charon server");
         }
-    }
 
-    signal(SIGINT, sigint_handler);
-
-    global_server = worker_create(config);
-    if (worker_start(global_server, atoi(argv[optind])) == 0) {
-        worker_loop(global_server);
+        worker_destroy(global_server);
     } else {
-        charon_error("cannot start charon server");
+        charon_error("cannot parse configuration file, terminating");
     }
-
-    worker_destroy(global_server);
 
     config_destroy(config);
     free(config);

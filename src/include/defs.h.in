@@ -17,4 +17,9 @@ typedef unsigned long long msec_t;
 
 #define UNUSED __attribute__ ((unused))
 
+#define min(a, b) (((a) < (b)) ? (a) : (b))
+
+#define likely(x) __builtin_expect(!!(x),1)
+#define unlikely(x) __builtin_expect(!!(x),0)
+
 #endif

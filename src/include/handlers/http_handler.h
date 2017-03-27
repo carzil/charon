@@ -17,9 +17,10 @@ typedef struct http_context_s http_context_t;
 
 #define http_context(ptr) ((http_context_t*) ptr)
 
-void http_handler_connection_init(worker_t* w, connection_t* c);
+void http_handler_on_init(worker_t* w);
 void http_handler_on_request(worker_t* w, connection_t* c);
 void http_handler_on_connection_end(worker_t* w, connection_t* c);
 void http_handler_on_finish(worker_t* w);
+void http_handler_connection_init(worker_t* w, connection_t* c);
 
 #endif

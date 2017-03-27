@@ -33,8 +33,9 @@ worker_t* worker_create(config_t* conf)
     worker->socket = -1;
     worker->is_running = 0;
     worker->conf = conf;
-    LIST_HEAD_INIT(worker->clients);
+    list_head_init(worker->clients);
     timer_queue_init(&worker->timer_queue);
+    vector_init(&worker->connections);
     return worker;
 }
 
@@ -142,20 +143,11 @@ int worker_start(worker_t* worker, int port)
     return 0;
 }
 
-connection_t* worker_client_create(worker_t* worker)
-{
-    connection_t* client = conn_create();
-    list_insert_last(&worker->clients, &client->node);
-    return client;
-}
-
 int worker_accept_client(worker_t* worker, connection_t** result)
 {
-    struct epoll_event ctl_event;
     connection_t* client;
     socklen_t in_addr_len = sizeof(struct sockaddr);
     struct sockaddr addr;
-    int error;
 
     int new_fd = accept(worker->socket, &addr, &in_addr_len);
 
@@ -174,18 +166,11 @@ int worker_accept_client(worker_t* worker, connection_t** result)
         return -CHARON_ERR;
     }
 
-    client = worker_client_create(worker);
-    memcpy(&client->addr, &addr, in_addr_len);
-
+    client = conn_create();
     client->fd = new_fd;
-    ctl_event.data.ptr = client;
-    ctl_event.events = EPOLLIN | EPOLLET;
-
-    if (epoll_ctl(worker->epoll_fd, EPOLL_CTL_ADD, new_fd, &ctl_event) < 0) {
-        charon_perror("epoll_ctl: ");
-        error = -CHARON_ERR;
-        goto cleanup;
-    }
+    list_insert_last(&worker->clients, &client->node);
+    vector_set(&worker->connections, client->fd, &client, connection_t*);
+    memcpy(&client->addr, &addr, in_addr_len);
 
     if (!getnameinfo(&client->addr, in_addr_len,
                     client->hbuf, sizeof(client->hbuf),
@@ -195,46 +180,78 @@ int worker_accept_client(worker_t* worker, connection_t** result)
     }
 
     *result = client;
+
     return CHARON_OK;
-
-cleanup:
-    conn_destroy(client);
-    free(client);
-    return error;
 }
 
-void worker_schedule_write(worker_t* worker, connection_t* c)
+void worker_epoll_event_ctl(worker_t* worker, connection_t* c, event_t* ev, int mode, int flags)
 {
     struct epoll_event ctl_event;
     memset(&ctl_event, 0, sizeof(ctl_event));
-    ctl_event.data.ptr = c;
-    ctl_event.events = EPOLLIN | EPOLLOUT | EPOLLET;
-    if (epoll_ctl(worker->epoll_fd, EPOLL_CTL_MOD, c->fd, &ctl_event) < 0) {
+    ctl_event.data.fd = c->fd;
+    ctl_event.events = flags;
+    if (epoll_ctl(worker->epoll_fd, mode, ev->fd, &ctl_event) < 0) {
         charon_perror("epoll_ctl: ");
     }
-    charon_debug("connection was scheduled for write (fd=%d)", c->fd);
 }
 
-void worker_unschedule_write(worker_t* worker, connection_t* c)
+void worker_epoll_modify_or_add(worker_t* worker, connection_t* c, event_t* ev, int flags)
 {
-    struct epoll_event ctl_event;
-    memset(&ctl_event, 0, sizeof(ctl_event));
-    ctl_event.data.ptr = c;
-    ctl_event.events = EPOLLIN | EPOLLET;
-    if (epoll_ctl(worker->epoll_fd, EPOLL_CTL_MOD, c->fd, &ctl_event) < 0) {
-        charon_perror("epoll_ctl: ");
+    if (c->in_epoll) {
+        worker_epoll_event_ctl(worker, c, ev, EPOLL_CTL_MOD, flags);
+    } else {
+        worker_epoll_event_ctl(worker, c, ev, EPOLL_CTL_ADD, flags);
+        c->in_epoll = 1;
     }
-    charon_debug("connection was unscheduled for write (fd=%d)", c->fd);
+    c->epoll_flags = flags;
 }
 
-void worker_stop_connection(worker_t* worker, connection_t* c)
+void worker_enable_read(worker_t* worker, connection_t* c)
+{
+    charon_debug("enable read fd=%d", c->fd);
+    worker_epoll_modify_or_add(worker, c, &c->read_ev, c->epoll_flags | EPOLLIN | EPOLLET);
+}
+
+void worker_disable_read(worker_t* worker, connection_t* c)
+{
+    charon_debug("disable read fd=%d", c->fd);
+    worker_epoll_modify_or_add(worker, c, &c->read_ev, (c->epoll_flags ^ EPOLLIN) | EPOLLET);
+}
+
+void worker_enable_write(worker_t* worker, connection_t* c)
+{
+    charon_debug("enable write fd=%d", c->fd);
+    worker_epoll_modify_or_add(worker, c, &c->write_ev, c->epoll_flags | EPOLLOUT | EPOLLET);
+}
+
+void worker_disable_write(worker_t* worker, connection_t* c)
+{
+    charon_debug("disable write fd=%d", c->fd);
+    worker_epoll_modify_or_add(worker, c, &c->write_ev, (c->epoll_flags ^ EPOLLOUT) | EPOLLET);
+}
+
+void worker_delayed_event_push(worker_t* worker, event_t* ev, msec_t expire)
+{
+    ev->expire = expire;
+    timer_queue_push(&worker->timer_queue, ev);
+}
+
+void worker_delayed_event_update(worker_t* worker, event_t* ev, msec_t expire)
+{
+    timer_queue_update(&worker->timer_queue, ev, expire);
+}
+
+void worker_delayed_event_remove(worker_t* worker, event_t* ev)
+{
+    timer_queue_remove(&worker->timer_queue, ev);
+}
+
+void _worker_stop_connection(worker_t* worker, connection_t* c)
 {
     charon_info("connection closed fd=%d, addr=%s:%s", c->fd, c->hbuf, c->sbuf);
     http_handler_on_connection_end(worker, c);
-    timer_queue_remove(&worker->timer_queue, c->timeout_event);
-    event_destroy(c->timeout_event);
-    free(c->timeout_event);
     list_remove(&c->node);
+    worker->connections[c->fd] = NULL;
     close(c->fd);
     conn_destroy(c);
     free(c);
@@ -273,8 +290,10 @@ void worker_loop(worker_t* worker)
 {
     struct epoll_event events[MAX_EVENTS];
     struct epoll_event* epoll_event;
+    int events_count;
     connection_t* c;
-    int events_count, res;
+
+    http_handler_on_init(worker);
 
     charon_info("started worker loop");
     while (worker->is_running) {
@@ -282,6 +301,7 @@ void worker_loop(worker_t* worker)
         if (!timer_queue_empty(&worker->timer_queue)) {
             timeout = timer_queue_top(&worker->timer_queue)->expire - get_current_msec();
         }
+
         events_count = epoll_wait(worker->epoll_fd, events, MAX_EVENTS, (int)timeout);
 
         if (events_count < 0) {
@@ -293,21 +313,17 @@ void worker_loop(worker_t* worker)
         charon_debug("%d events in queue", events_count);
         for (int i = 0; i < events_count; i++) {
             epoll_event = events + i;
-            c = (connection_t*) epoll_event->data.ptr;
             if (epoll_event->data.fd == worker->socket) {
                 worker_accept_connections(worker);
             } else {
-                if (epoll_event->events & EPOLLIN) {
-                    charon_debug("read event on fd=%d", c->fd);
-                    c->on_request(worker, c);
+                c = worker->connections[epoll_event->data.fd];
+                if (c && epoll_event->events & EPOLLIN) {
+                    c->read_ev.handler(worker, &c->read_ev);
                 }
 
-                if (epoll_event->events & EPOLLOUT) {
-                    charon_debug("write event on fd=%d", c->fd);
-                    res = conn_write(c, &c->chain);
-                    if (res == CHARON_OK) {
-                        worker_unschedule_write(worker, c);
-                    }
+                c = worker->connections[epoll_event->data.fd];
+                if (c && epoll_event->events & EPOLLOUT) {
+                    c->write_ev.handler(worker, &c->write_ev);
                 }
             }
         }
@@ -317,12 +333,7 @@ void worker_loop(worker_t* worker)
         charon_debug("processing timeouts");
         while (!timer_queue_empty(&worker->timer_queue) &&
             (ev = timer_queue_top(&worker->timer_queue))->expire <= c_time) {
-            if (ev->conn->on_event != NULL) {
-                charon_debug("event on connection fd=%d", ev->conn->fd);
-                if (ev->conn->on_event(worker, ev->conn, ev)) {
-                    timer_queue_remove(&worker->timer_queue, ev);
-                }
-            }
+            ev->handler(worker, ev);
         }
         charon_debug("event loop end");
     }

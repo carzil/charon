@@ -37,10 +37,10 @@ struct http_version_s {
 };
 
 struct http_uri_s {
-    struct string scheme;
-    struct string host;
+    string_t scheme;
+    string_t host;
     int port;
-    struct string path;
+    string_t path;
 };
 
 struct http_header_s {
@@ -50,19 +50,6 @@ struct http_header_s {
 
 #define HTTP_EMPTY_HEADER (http_header_t) { STRING_EMPTY, STRING_EMPTY }
 
-struct http_headers_container_s {
-    size_t content_length;
-
-    enum {
-        CLOSE,
-        KEEP_ALIVE
-    } connection;
-
-    struct string server;
-
-    struct vector extra; // vector of struct http_header
-};
-
 struct http_request_s {
     int method;
     http_uri_t uri;
@@ -71,9 +58,20 @@ struct http_request_s {
     size_t body_size;
     chain_t body;
 
-    struct http_headers_container_s headers;
-
     int parsed:1;
+
+    /* headers */
+    VECTOR_DEFINE(headers, http_header_t);
+
+    string_t host;
+    string_t host_port;
+
+    size_t content_length;
+
+    enum {
+        CLOSE,
+        KEEP_ALIVE
+    } connection;
 };
 
 struct http_response_s {
@@ -81,28 +79,27 @@ struct http_response_s {
     char* status_message;
     http_version_t http_version;
     buffer_t* body_buf;
-    struct http_headers_container_s headers;
-};
 
-static inline void http_headers_container_destroy(http_headers_container_t* container)
-{
-    vector_destroy(&container->extra);
-}
+    /* headers */
+    VECTOR_DEFINE(headers, http_header_t);
+    string_t server;
+    size_t content_length;
+};
 
 static inline void http_request_init(http_request_t* req)
 {
-    req->headers.content_length = 0;
+    req->content_length = 0;
 }
 
 static inline void http_request_destroy(UNUSED http_request_t* req)
 {
     chain_destroy(&req->body);
-    http_headers_container_destroy(&req->headers);
+    vector_destroy(&req->headers);
 }
 
 static inline void http_response_init(http_response_t* resp)
 {
-    resp->headers.content_length = 0;
+    resp->content_length = 0;
 }
 
 static inline void http_response_destroy(UNUSED http_response_t* resp)

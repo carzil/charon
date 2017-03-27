@@ -5,7 +5,7 @@
 
 int chain_init(chain_t* chain)
 {
-    LIST_HEAD_INIT(chain->buffers);
+    list_head_init(chain->buffers);
     return CHARON_OK;
 }
 

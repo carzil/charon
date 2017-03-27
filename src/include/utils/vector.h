@@ -5,54 +5,96 @@
 #include "utils/array.h"
 #include "defs.h"
 
-/* TODO: vector_foreach macro */
-
-struct vector {
-    struct array buf;
-    size_t size;
+enum {
+    VECTOR_INITIAL_CAPACITY = 8,
 };
 
-static inline int __vector_init(struct vector* v, size_t type_size, size_t initial_size)
+typedef struct {
+    size_t capacity;
+    size_t size;
+} vector_header_t;
+
+#define vector_header(v) (vector_header_t*)(((char*)v) - sizeof(vector_header_t))
+
+/*
+ * Vector is defined in user code like: VECTOR_DEFINE(connections, connection_t).
+ * It can be be then access like a regular array:
+ * connection[i] will return i-th connection in array.
+ * Vector consists of header and vector continuously located data. Header is located
+ * down from vector data:
+ *      +-----------------------+
+ *      |   header   |   data   |
+ *      +-----------------------+
+ *                   ^----------v
+ * In user code, vector points here.
+ */
+
+static inline void vector_init(void** v)
 {
-    int res = array_init(&v->buf, initial_size * type_size);
-    if (res < 0) {
-        return res;
+    vector_header_t* h = malloc(sizeof(vector_header_t));
+    h->size = 0;
+    h->capacity = 0;
+    *v = h + 1;
+}
+
+static inline int vector_ensure_capacity(void** v, size_t needed, size_t elem_size)
+{
+    vector_header_t* h = vector_header(*v);
+    if (needed > h->capacity) {
+        if (h->capacity == 0) {
+            h->capacity = VECTOR_INITIAL_CAPACITY;
+        }
+        while (needed > h->capacity) {
+            h->capacity = 3 * h->capacity / 2;
+        }
+        char* new_ptr = realloc(h, h->capacity * elem_size + sizeof(vector_header_t));
+        if (new_ptr == NULL) {
+            return -CHARON_NO_MEM;
+        }
+        *v = new_ptr + sizeof(vector_header_t);
     }
-    v->size = 0;
     return CHARON_OK;
 }
 
-static inline struct vector* __vector_create(size_t type_size, size_t initial_size)
+static inline void vector_set_elem(void** v, size_t where, void* mem, size_t elem_size)
 {
-    struct vector* v = (struct vector*) malloc(sizeof(struct vector));
-    if (!v) {
-        return NULL;
-    }
-    __vector_init(v, type_size, initial_size);
-    return v;
+    memcpy(((char*)*v) + where * elem_size, mem, elem_size);
 }
 
-static inline int __vector_push(struct vector* v, size_t type_size, char* mem)
+static inline int vector_push(void** v, void* mem, size_t elem_size)
 {
-    int res = array_append(&v->buf, mem, type_size);
-    if (res < 0) {
+    vector_header_t* h = vector_header(*v);
+    int res = vector_ensure_capacity(v, h->size + 1, elem_size);
+    if (res != CHARON_OK) {
         return res;
     }
-    v->size++;
+    h = vector_header(*v);
+    vector_set_elem(v, h->size++, mem, elem_size);
     return CHARON_OK;
 }
 
-static inline void vector_destroy(struct vector* v)
+static inline int vector_set(void** v, size_t where, void* mem, size_t elem_size)
 {
-    array_destroy(&v->buf);
+    int res = vector_ensure_capacity(v, where + 1, elem_size);
+    if (res != CHARON_OK) {
+        return res;
+    }
+    vector_set_elem(v, where, mem, elem_size);
+    return CHARON_OK;
 }
 
-#define vector_data(v, idx, type) (type*)(array_data(&(v)->buf) + (idx) * sizeof(type))
-#define vector_push(v, ptr, type) __vector_push(v, sizeof(type), (char*)ptr)
-#define vector_size(v) ((v)->size)
-#define vector_init(v, type, sz) __vector_init(v, sizeof(type), sz)
-#define vector_create(type, sz) __vector_create(sizeof(type), sz)
+static inline void vector_destroy(void** v)
+{
+    free(vector_header(*v));
+}
 
-typedef struct vector vector_t;
+#define vector_push(v, ptr, type) vector_push((void**)v, (void*)ptr, sizeof(type))
+#define vector_size(v) ((vector_header((v))->size)
+#define vector_init(v) vector_init((void**)v)
+#define vector_destroy(v) vector_destroy((void**)v)
+#define vector_set(v, where, what, type) vector_set((void**)v, where, what, sizeof(type))
+
+#define VECTOR_DEFINE(name, type) type* name
+
 
 #endif

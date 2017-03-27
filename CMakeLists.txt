@@ -2,10 +2,12 @@ cmake_minimum_required(VERSION 3.0.0)
 
 project(charon VERSION 0.1)
 
+option(CHARON_BUILD_TESTS "Build tests for charon" OFF)
+
+list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmake)
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=gnu99 -Wall -Wextra -Wpedantic")
 set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS} -Wextra -O0 -g -fsanitize=address")
 set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS} -Ofast")
-
 
 if (CMAKE_BUILD_TYPE MATCHES DEBUG)
     add_definitions(-DCHARON_DEBUG)
@@ -41,3 +43,8 @@ set(SOURCE_FILES
 )
 
 add_executable(charon src/main.c ${SOURCE_FILES})
+
+if(CHARON_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()

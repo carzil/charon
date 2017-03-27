@@ -2,37 +2,56 @@
 #define _EVENT_H_
 
 #include <stdlib.h>
+#include <sys/epoll.h>
 #include "utils/list.h"
 #include "defs.h"
 
-struct connection_s;
+enum {
+    EVENT_READ = 1,
+    EVENT_WRITE = 2,
+    EVENT_DELAYED = 4
+};
 
-typedef enum {
-    EV_TIMEOUT,
-} event_type_t;
+struct worker_s;
 
 struct event_s {
-    size_t timer_queue_idx;
+    void* data;
 
-    struct connection_s* conn;
-    event_type_t type;
+    size_t timer_queue_idx;
     msec_t expire;
+
+    int (*handler)(struct worker_s* w, struct event_s* ev);
+
+    int fd;
+
+    unsigned active:1;
+    unsigned delayed:1;
+    unsigned in_timer:1;
 };
 
 typedef struct event_s event_t;
 
-inline static event_t* event_create(struct connection_s* c, event_type_t type)
+static inline void event_init(event_t* ev)
+{
+    ev->data = NULL;
+    ev->active = 0;
+    ev->delayed = 0;
+    ev->in_timer = 0;
+    ev->expire = -1;
+    ev->fd = -1;
+    ev->handler = NULL;
+}
+
+static inline event_t* event_create()
 {
     event_t* ev = malloc(sizeof(event_t));
     if (ev == NULL) {
         return NULL;
     }
-    ev->conn = c;
-    ev->type = type;
     return ev;
 }
 
-inline static void event_destroy(UNUSED event_t* ev)
+static inline void event_destroy(UNUSED event_t* ev)
 {
 
 }

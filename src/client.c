@@ -8,6 +8,11 @@
 connection_t* conn_create()
 {
     connection_t* c = malloc(sizeof(connection_t));
+    c->in_epoll = 0;
+    c->epoll_flags = 0;
+    event_init(&c->read_ev);
+    event_init(&c->write_ev);
+    event_init(&c->timeout_ev);
     chain_init(&c->chain);
     return c;
 }

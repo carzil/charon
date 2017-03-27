@@ -3,6 +3,7 @@
 
 #include "utils/string.h"
 #include "utils/list.h"
+#include "utils/buffer.h"
 
 struct location_s {
     string_t loc;
@@ -12,9 +13,11 @@ struct location_s {
 
 struct vhost_s {
     string_t name;
+    string_t root;
+
+    buffer_t path;
 
     LIST_HEAD_DECLARE(locations);
-
     struct list_node lnode;
 };
 

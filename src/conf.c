@@ -67,7 +67,7 @@ void config_state_destroy(config_state_t* st)
 
 void config_init(config_t* conf)
 {
-    LIST_HEAD_INIT(conf->vhosts);
+    list_head_init(conf->vhosts);
 }
 
 config_t* config_create()
@@ -243,14 +243,28 @@ int read_token(config_state_t* st)
     return res;
 }
 
+static inline void copy_token_string(config_state_t* st, string_t* where)
+{
+    size_t sz = array_size(&st->token_s);
+    where->start = copy_string(array_data(&st->token_s), sz);
+    where->end = where->start + sz;
+}
+
 int config_parse_vhost_field(config_state_t* st, vhost_t* vhost)
 {
     int res;
-    if (!strcmp(array_data(&st->token_s), "name")) {
+    char* field_name = array_data(&st->token_s);
+    if (!strcmp(field_name, "name")) {
         EXPECT_TOKEN(t_string);
-        size_t sz = array_size(&st->token_s);
-        vhost->name.start = copy_string(array_data(&st->token_s), sz);
+        copy_token_string(st, &vhost->name);
         EXPECT_TOKEN(t_semicolon);
+    } else if (!strcmp(field_name, "root")) {
+        EXPECT_TOKEN(t_string);
+        copy_token_string(st, &vhost->root);
+        EXPECT_TOKEN(t_semicolon);
+    } else {
+        charon_error("unknown field '%s'", field_name);
+        return -CHARON_ERR;
     }
     return CHARON_OK;
 }

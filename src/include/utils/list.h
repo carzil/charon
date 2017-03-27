@@ -60,5 +60,7 @@ static inline void list_rotate_left(struct list_node* node)
 
 #define LIST_HEAD_DECLARE(name) struct list_node name
 #define LIST_HEAD_DEFINE(name) struct list_node name = { &name, &name }
-#define LIST_HEAD_INIT(head) (head) = ((struct list_node) { &(head), &(head) })
+#define list_head_init(head) (head) = ((struct list_node) { &(head), &(head) })
+
+typedef struct list_node list_node_t;
 #endif

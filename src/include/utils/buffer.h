@@ -7,6 +7,7 @@
 #include <unistd.h>
 
 #include "utils/list.h"
+#include "utils/string.h"
 #include "defs.h"
 
 struct buffer {
@@ -68,6 +69,16 @@ static inline void buffer_clean(struct buffer* buf)
 {
     memset(buf->start, '\0', buf->end - buf->start);
     buf->last = buf->start;
+}
+
+static inline int buffer_string_copy(struct buffer* buf, string_t str)
+{
+    size_t sz = string_size(&str);
+    if (buf->last + sz > buf->end) {
+        return -CHARON_NO_MEM;
+    }
+    memcpy(buf->last, str.start, sz);
+    return CHARON_OK;
 }
 
 #define buffer_in_file(buf) do { (buf)->in_file = 1; (buf)->in_memory = 0; } while (0)

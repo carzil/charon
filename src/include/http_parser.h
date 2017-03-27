@@ -45,11 +45,7 @@ typedef enum {
     st_header_end,
     st_headers_end,
 
-    st_body_start,
-    st_body,
-    st_body_end,
-
-    st_done
+    st_body_start
 } http_parser_state;
 
 struct http_parser_s {

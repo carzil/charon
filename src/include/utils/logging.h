@@ -22,22 +22,24 @@ static inline void charon_log(loglevel_t lvl, const char* fmt, va_list args)
     size_t offset;
 
     switch (lvl) {
-        case DEBUG:
-            lvl_string = "[DEBUG] ";
-            lvl_string_size = 8;
-            break;
-        case INFO:
-            lvl_string = "[INFO] ";
-            lvl_string_size = 7;
-            break;
-        case ERROR:
-            lvl_string = "[ERROR] ";
-            lvl_string_size = 8;
-            break;
-        case PERROR:
-            lvl_string = "[ERROR] ";
-            lvl_string_size = 8;
-            break;
+    case DEBUG:
+        lvl_string = "[DEBUG] ";
+        lvl_string_size = 8;
+        break;
+    case INFO:
+        lvl_string = "[INFO] ";
+        lvl_string_size = 7;
+        break;
+    case ERROR:
+        lvl_string = "[ERROR] ";
+        lvl_string_size = 8;
+        break;
+    case PERROR:
+        lvl_string = "[ERROR] ";
+        lvl_string_size = 8;
+        break;
+    default:
+        return;
     }
 
     strcpy(buffer, lvl_string);
@@ -71,7 +73,7 @@ __attribute__((format(__printf__, 1, 2))) static inline void charon_debug(const 
 
 #else
 
-#define charon_debug(fmt, ...)
+#define charon_debug(...)
 
 #endif
 
