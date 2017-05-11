@@ -250,6 +250,8 @@ int http_handler_connection_init(connection_t* c)
 {
     c->context = malloc(sizeof(http_context_t));
     http_context_t* ctx = http_context(c->context);
+    http_conf_t* conf = c->handler->conf;
+
     http_parser_init(&ctx->parser);
     buffer_init(&ctx->req_buf);
     buffer_init(&ctx->body_buf);
@@ -263,7 +265,7 @@ int http_handler_connection_init(connection_t* c)
     c->write_ev.handler = http_handler_on_write;
     c->timeout_ev.handler = http_handler_on_timeout;
     worker_enable_read(c);
-    worker_delayed_event_push(c->worker, &c->timeout_ev, get_current_msec() + 5 * 1000);
+    worker_delayed_event_push(c->worker, &c->timeout_ev, get_current_msec() + conf->main.accept_timeout * 1000);
 
     return CHARON_OK;
 }

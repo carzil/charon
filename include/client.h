@@ -52,6 +52,6 @@ static inline void event_set_connection(event_t* ev, connection_t* c)
     ev->fd = c->fd;
 }
 
-#define event_connection(ev) ((connection_t*) &(ev)->data)
+#define event_connection(ev) ((connection_t*) (ev)->data)
 
 #endif

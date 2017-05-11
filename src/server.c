@@ -247,10 +247,10 @@ void worker_delayed_event_remove(worker_t* worker, event_t* ev)
 void worker_stop_connection(connection_t* c)
 {
     charon_info("connection closed fd=%d, addr=%s:%s", c->fd, c->hbuf, c->sbuf);
-    c->handler->on_connection_end(c);
     list_remove(&c->node);
     c->worker->connections[c->fd] = NULL;
     close(c->fd);
+    c->handler->on_connection_end(c);
     conn_destroy(c);
     free(c);
 }
