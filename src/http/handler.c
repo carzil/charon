@@ -4,22 +4,19 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <stddef.h>
+#include <linux/limits.h>
 
 #include "http.h"
-#include "handlers/http_handler.h"
-#include "http_parser.h"
+#include "http/handler.h"
+#include "http/parser.h"
 #include "defs.h"
 #include "chain.h"
 #include "utils/list.h"
+#include "server.h"
 
 const char CHARON_NOT_FOUND_PAGE[] = "<html><body><center><h1>Not found</h1></center><hr><center>charon " CHARON_VERSION "</center></body></html>";
 
-int http_handler_on_read(worker_t* s, event_t* ev);
-
-void http_handler_on_finish(UNUSED worker_t* s)
-{
-
-}
+int http_handler_on_read(event_t* ev);
 
 buffer_t* make_status_line(http_response_t* resp)
 {
@@ -57,7 +54,7 @@ buffer_t* make_headers(http_response_t* resp)
     return buf;
 }
 
-void http_handler_make_response(worker_t* s, connection_t* c)
+void http_handler_make_response(connection_t* c)
 {
     http_context_t* ctx = http_context(c->context);
     http_response_t* resp = &ctx->response;
@@ -70,20 +67,25 @@ void http_handler_make_response(worker_t* s, connection_t* c)
     chain_push_buffer(&c->chain, resp->body_buf);
     buffer_clean(&ctx->req_buf);
     http_parser_init(&ctx->parser);
-    worker_enable_write(s, c);
+    worker_enable_write(c);
 }
 
 static char* make_path(http_request_t* req, vhost_t* vhost)
 {
+    int pos = 0;
     if (buffer_string_copy(&vhost->path, req->uri.path)) {
         return NULL;
     }
-    vhost->path.last[string_size(&req->uri.path)] = '\0';
+    if (!string_cmpl(&req->uri.path, "/") && string_size(&req->uri.path) == 1) {
+        memcpy(vhost->path.last, "index.html", sizeof("index.html"));
+        pos = sizeof("index.html");
+    }
+    vhost->path.last[string_size(&req->uri.path) + pos] = '\0';
     return vhost->path.start;
 
 }
 
-static int process_vhost_request(worker_t* s, connection_t* c, vhost_t* vhost)
+static int process_vhost_request(connection_t* c, vhost_t* vhost)
 {
     int fd;
     struct stat st;
@@ -111,35 +113,37 @@ static int process_vhost_request(worker_t* s, connection_t* c, vhost_t* vhost)
         ctx->response.body_buf->fd = fd;
         ctx->response.body_buf->size = st.st_size;
     }
-    http_handler_make_response(s, c);
+    http_handler_make_response(c);
     http_request_destroy(&ctx->request);
     c->read_ev.handler = http_handler_on_read;
     return CHARON_OK;
 }
 
-int http_handler_process_request(worker_t* w, connection_t* c)
+int http_handler_process_request(connection_t* c)
 {
-    struct list_node* ptr;
     http_context_t* ctx = http_context(c->context);
+    http_conf_t* conf = (http_conf_t*) c->handler->conf;
     string_t vhost_name = ctx->request.host;
+
     if (string_size(&vhost_name) == 0) {
         charon_info("request without host!");
-        worker_stop_connection(w, c);
+        worker_stop_connection(c);
         return CHARON_OK;
     }
-    list_foreach(&w->conf->vhosts, ptr) {
-        vhost_t* vhost = list_entry(ptr, vhost_t, lnode);
+
+    for (size_t i = 0; i < vector_size(&conf->vhosts); i++) {
+        vhost_t* vhost = &conf->vhosts[i];
         if (!string_cmp(&vhost->name, &vhost_name)) {
             charon_debug("request to host '%s'", vhost->name.start);
-            return process_vhost_request(w, c, vhost);
+            return process_vhost_request(c, vhost);
         }
     }
     /* we didn't found appropriate vhost */
-    worker_stop_connection(w, c);
+    worker_stop_connection(c);
     return CHARON_OK;
 }
 
-int http_handler_on_read_body(worker_t* s, event_t* ev)
+int http_handler_on_read_body(event_t* ev)
 {
     int count;
     connection_t* c = ev->data;
@@ -150,7 +154,7 @@ int http_handler_on_read_body(worker_t* s, event_t* ev)
     } else {
         if (body_size > 4096) {
             charon_debug("client sent too big body size (%zu bytes)", body_size);
-            worker_stop_connection(s, c);
+            worker_stop_connection(c);
             return CHARON_OK;
         }
 
@@ -159,7 +163,7 @@ int http_handler_on_read_body(worker_t* s, event_t* ev)
         }
         count = conn_read(c, &ctx->body_buf);
         if (count < 0 || c->eof) {
-            worker_stop_connection(s, c);
+            worker_stop_connection(c);
         } else if (body_size == (size_t)(&ctx->body_buf.last - &ctx->body_buf.start)) {
             goto process_request;
         }
@@ -167,10 +171,10 @@ int http_handler_on_read_body(worker_t* s, event_t* ev)
     }
 
 process_request:
-    return http_handler_process_request(s, c);
+    return http_handler_process_request(c);
 }
 
-int http_handler_on_read(worker_t* s, event_t* ev)
+int http_handler_on_read(event_t* ev)
 {
     int count, res;
     connection_t* c = ev->data;
@@ -187,10 +191,10 @@ int http_handler_on_read(worker_t* s, event_t* ev)
         if (count == -CHARON_BUFFER_FULL) {
             charon_debug("client sent too big request (addr=%s)", c->hbuf);
         }
-        worker_stop_connection(s, c);
+        worker_stop_connection(c);
         return CHARON_OK;
     } else if (count == 0 && c->eof) {
-        worker_stop_connection(s, c);
+        worker_stop_connection(c);
         return CHARON_OK;
     }
 
@@ -198,7 +202,7 @@ int http_handler_on_read(worker_t* s, event_t* ev)
     charon_debug("content:\n===== [ request dump ] =====\n%*s===== [ request dump ] =====", (int)(ctx->req_buf.last - ctx->req_buf.start), ctx->req_buf.start);
     res = http_parser_feed(&ctx->parser, &ctx->req_buf, &ctx->request);
     if (res < 0) {
-        worker_stop_connection(s, c);
+        worker_stop_connection(c);
         return CHARON_OK;
     } else if (res == HTTP_PARSER_BODY_START) {
         charon_info("readed request, method=%d, http version=%d.%d, path='%.*s'",
@@ -209,40 +213,40 @@ int http_handler_on_read(worker_t* s, event_t* ev)
             ctx->request.uri.path.start
         );
         ev->handler = http_handler_on_read_body;
-        return http_handler_on_read_body(s, ev);
+        return http_handler_on_read_body(ev);
     }
     return CHARON_OK;
 }
 
-int http_handler_on_write(worker_t* worker, event_t* ev)
+int http_handler_on_write(event_t* ev)
 {
     connection_t* c = ev->data;
     int res = conn_write(c, &c->chain);
     if (res != CHARON_AGAIN && res != CHARON_OK) {
-        worker_stop_connection(worker, c);
+        worker_stop_connection(c);
     } else if (res == CHARON_OK) {
-        worker_disable_write(worker, c);
+        worker_disable_write(c);
     }
     return CHARON_OK;
 }
 
-void http_handler_on_connection_end(UNUSED worker_t* s, connection_t* c)
+void http_handler_on_connection_end(connection_t* c)
 {
     http_context_t* ctx = http_context(c->context);
     http_parser_destroy(&ctx->parser);
     buffer_destroy(&ctx->req_buf);
     buffer_destroy(&ctx->body_buf);
-    worker_delayed_event_remove(s, &c->timeout_ev);
+    worker_delayed_event_remove(c->worker, &c->timeout_ev);
     free(ctx);
 }
 
-int http_handler_on_timeout(worker_t* worker, event_t* ev)
+int http_handler_on_timeout(event_t* ev)
 {
-    worker_stop_connection(worker, ev->data);
+    worker_stop_connection(event_connection(ev));
     return CHARON_OK;
 }
 
-void http_handler_connection_init(worker_t* worker, connection_t* c)
+int http_handler_connection_init(connection_t* c)
 {
     c->context = malloc(sizeof(http_context_t));
     http_context_t* ctx = http_context(c->context);
@@ -258,24 +262,65 @@ void http_handler_connection_init(worker_t* worker, connection_t* c)
     c->read_ev.handler = http_handler_on_read;
     c->write_ev.handler = http_handler_on_write;
     c->timeout_ev.handler = http_handler_on_timeout;
-    worker_enable_read(worker, c);
-    worker_delayed_event_push(worker, &c->timeout_ev, get_current_msec() + 5 * 1000);
+    worker_enable_read(c);
+    worker_delayed_event_push(c->worker, &c->timeout_ev, get_current_msec() + 5 * 1000);
+
+    return CHARON_OK;
 }
 
-void http_handler_on_init(worker_t* w)
-{
-    list_node_t* ptr;
-    vhost_t* vhost;
-    buffer_t* buf;
+static conf_field_def_t vhost_fields_def[] = {
+    { "root", CONF_STRING, offsetof(vhost_t, root) },
+    { "name", CONF_STRING, offsetof(vhost_t, name) },
+    { NULL, 0, 0 }
+};
 
-    list_foreach(&w->conf->vhosts, ptr) {
-        vhost = list_entry(ptr, vhost_t, lnode);
-        buf = &vhost->path;
-        strcpy(buf->start, vhost->root.start);
-        buffer_string_copy(buf, vhost->root);
+static conf_field_def_t main_fields_def[] = {
+    { "accept_timeout", CONF_TIME_INTERVAL, offsetof(http_main_conf_t, accept_timeout) },
+    { NULL, 0, 0 }
+};
+
+static conf_section_def_t conf_def[] = {
+    { "vhost", CONF_ALLOW_MULTIPLE, vhost_fields_def, sizeof(vhost_t), offsetof(http_conf_t, vhosts) },
+    { "main", 0, main_fields_def, sizeof(http_main_conf_t), offsetof(http_conf_t, main) },
+    { NULL, 0, NULL, 0, 0},
+};
+
+void http_handler_on_config_done(handler_t* handler)
+{
+    http_handler_t* http_handler = (http_handler_t*) handler;
+    http_conf_t* conf = handler->conf;
+
+    charon_debug("%ld", conf->main.accept_timeout);
+
+    for (size_t i = 0; i < vector_size(&conf->vhosts); i++) {
+        vhost_t* vhost = &conf->vhosts[i];
+        charon_debug("vhost '%s' at '%s'", vhost->name.start, vhost->root.start);
+        buffer_malloc(&vhost->path, PATH_MAX);
+        buffer_t* buf = &vhost->path;
+        strcpy(buf->start, conf->vhosts->root.start);
+        buffer_string_copy(buf, conf->vhosts->root);
         buf->last = buf->start + string_size(&vhost->root);
         if (*(buf->last - 1) != '/') {
             *(buf->last - 1) = '/';
         }
     }
+
+}
+
+http_handler_t* http_handler_on_init()
+{
+    http_handler_t* http_handler = malloc(sizeof(http_handler_t));
+    handler_t* handler = (handler_t*) http_handler;
+    handler->on_connection_init = http_handler_connection_init;
+    handler->on_connection_end = http_handler_on_connection_end;
+    handler->on_config_done = http_handler_on_config_done;
+    handler->conf_def = conf_def;
+    handler->conf = malloc(sizeof(http_conf_t));
+
+    return http_handler;
+}
+
+void http_handler_on_finish(http_handler_t* h)
+{
+    free(h);
 }

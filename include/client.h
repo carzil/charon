@@ -11,19 +11,15 @@
 #include "http.h"
 #include "chain.h"
 #include "event.h"
+#include "handler.h"
 
 struct worker_s;
-
-enum {
-    CONNECTION_VALID = 0,
-    CONNECTION_INVALID = 1
-};
 
 struct connection_s {
     struct list_node node;
 
     int fd;
-    struct sockaddr addr;
+    struct sockaddr_storage addr;
 
     char hbuf[NI_MAXHOST];
     char sbuf[NI_MAXSERV];
@@ -35,6 +31,8 @@ struct connection_s {
     chain_t chain;
 
     void* context;
+    handler_t* handler;
+    struct worker_s* worker;
 
     event_t timeout_ev;
     event_t read_ev;
@@ -53,5 +51,7 @@ static inline void event_set_connection(event_t* ev, connection_t* c)
     ev->data = c;
     ev->fd = c->fd;
 }
+
+#define event_connection(ev) ((connection_t*) &(ev)->data)
 
 #endif

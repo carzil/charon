@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <ctype.h>
 
-#include "http_parser.h"
+#include "http/parser.h"
 #include "utils/logging.h"
 #include "utils/string.h"
 
@@ -13,6 +13,7 @@ static const char* HTTP_METHODS[] = { "GET", "POST" };
         p->state = to;                                  \
         charon_debug("hp_parser: " #from " -> " #to);   \
     } while (0)
+
 
 http_request_t* http_request_create()
 {
@@ -259,4 +260,3 @@ int http_parser_feed(http_parser_t* p, buffer_t* buf, http_request_t* request) {
 void http_parser_destroy(UNUSED http_parser_t* parser)
 {
 }
-

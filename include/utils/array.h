@@ -40,7 +40,6 @@ static inline struct array* array_create(size_t capacity)
 static inline int array_ensure_capacity(struct array* array, size_t capacity)
 {
     if (capacity > array->capacity) {
-        charon_debug("ensure capacity: have %zu bytes, requested %zu bytes", array->capacity, capacity);
         size_t new_capacity = array->capacity;
         while (capacity > new_capacity) {
             new_capacity = 3 * new_capacity / 2;

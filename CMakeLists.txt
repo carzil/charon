@@ -14,8 +14,8 @@ if (CMAKE_BUILD_TYPE MATCHES DEBUG)
 endif()
 
 include_directories(
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/include
-    ${CMAKE_CURRENT_BINARY_DIR}/src/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_BINARY_DIR}/include
 )
 
 execute_process(
@@ -26,16 +26,16 @@ execute_process(
 )
 
 configure_file(
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/include/defs.h.in
-    ${CMAKE_CURRENT_BINARY_DIR}/src/include/defs.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/defs.h.in
+    ${CMAKE_CURRENT_BINARY_DIR}/include/defs.h
 )
 
 set(SOURCE_FILES
     src/http.c
-    src/http_parser.c
+    src/http/parser.c
+    src/http/handler.c
     src/client.c
     src/chain.c
-    src/handlers/http_handler.c
     src/conf.c
     src/server.c
     src/http/vhost.c

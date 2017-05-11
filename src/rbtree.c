@@ -304,3 +304,31 @@ void rb_remove(struct rb_tree* tree, struct rb_node* node)
         __rb_remove_rebalance(tree, node, parent);
     }
 }
+
+// static inline void rb_print(struct rb_node* node, int idt)
+// {
+//     if (node == NULL) {
+//         return;
+//     }
+
+//     for (int i = 0; i < idt; i++) {
+//         printf("--");
+//     }
+
+//     event_t* ev = rb_entry(node, event_t, rnode);
+//     if (node->color == RB_RED) {
+//         printf("> \033[31m%lld\033[0m (%p)\n", ev->expire, &ev->rnode);
+//     } else {
+//         printf("> \033[32m%lld\033[0m (%p)\n", ev->expire, &ev->rnode);
+//     }
+//     for (int i = 0; i < idt; i++) {
+//         printf(" ");
+//     }
+//     printf("left:\n");
+//     rb_print(node->left, idt + 1);
+//     for (int i = 0; i < idt; i++) {
+//         printf(" ");
+//     }
+//     printf("right:\n");
+//     rb_print(node->right, idt + 1);
+// }

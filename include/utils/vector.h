@@ -14,7 +14,8 @@ typedef struct {
     size_t size;
 } vector_header_t;
 
-#define vector_header(v) (vector_header_t*)(((char*)v) - sizeof(vector_header_t))
+#define vector_header(v) (vector_header_t*)(((char*)(v)) - sizeof(vector_header_t))
+#define vector_size(v) ((vector_header(*((void**)v)))->size)
 
 /*
  * Vector is defined in user code like: VECTOR_DEFINE(connections, connection_t).
@@ -61,7 +62,7 @@ static inline void vector_set_elem(void** v, size_t where, void* mem, size_t ele
     memcpy(((char*)*v) + where * elem_size, mem, elem_size);
 }
 
-static inline int vector_push(void** v, void* mem, size_t elem_size)
+static inline int __vector_push(void** v, void* mem, size_t elem_size)
 {
     vector_header_t* h = vector_header(*v);
     int res = vector_ensure_capacity(v, h->size + 1, elem_size);
@@ -73,7 +74,21 @@ static inline int vector_push(void** v, void* mem, size_t elem_size)
     return CHARON_OK;
 }
 
-static inline int vector_set(void** v, size_t where, void* mem, size_t elem_size)
+static inline int __vector_resize(void** v, size_t new_size, size_t elem_size)
+{
+    vector_header_t* h = vector_header(*v);
+    if (new_size > h->capacity) {
+        int res = vector_ensure_capacity(v, new_size, elem_size);
+        if (res != CHARON_OK) {
+            return res;
+        }
+    }
+    h = vector_header(*v);
+    h->size = new_size;
+    return CHARON_OK;
+}
+
+static inline int __vector_set(void** v, size_t where, void* mem, size_t elem_size)
 {
     int res = vector_ensure_capacity(v, where + 1, elem_size);
     if (res != CHARON_OK) {
@@ -88,11 +103,10 @@ static inline void vector_destroy(void** v)
     free(vector_header(*v));
 }
 
-#define vector_push(v, ptr, type) vector_push((void**)v, (void*)ptr, sizeof(type))
-#define vector_size(v) ((vector_header((v))->size)
-#define vector_init(v) vector_init((void**)v)
+#define vector_push(v, ptr, type) __vector_push((void**)v, (void*)ptr, sizeof(type))
+#define vector_init(v) vector_init((void**)(v))
 #define vector_destroy(v) vector_destroy((void**)v)
-#define vector_set(v, where, what, type) vector_set((void**)v, where, what, sizeof(type))
+#define vector_set(v, where, what, type) __vector_set((void**)v, where, what, sizeof(type))
 
 #define VECTOR_DEFINE(name, type) type* name
 

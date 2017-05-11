@@ -30,7 +30,7 @@ static struct option charon_options[] = {
 
 int main(int argc, char* argv[])
 {
-    int option_index = 0, res, c;
+    int option_index = 0, c;
     char* config_name = NULL;
 
     for (;;) {
@@ -60,26 +60,18 @@ int main(int argc, char* argv[])
         return 1;
     }
 
-    config_t* config = NULL;
 
-    res = config_open(config_name, &config);
+    // signal(SIGINT, sigint_handler);
 
-    if (res == CHARON_OK) {
-        signal(SIGINT, sigint_handler);
+    global_server = worker_create(config_name);
 
-        global_server = worker_create(config);
-        if (worker_start(global_server, atoi(argv[optind])) == 0) {
-            worker_loop(global_server);
-        } else {
-            charon_error("cannot start charon server");
-        }
-
-        worker_destroy(global_server);
+    if (worker_start(global_server, atoi(argv[optind])) == 0) {
+        worker_loop(global_server);
     } else {
-        charon_error("cannot parse configuration file, terminating");
+        charon_error("cannot start charon server");
     }
 
-    config_destroy(config);
-    free(config);
+    worker_destroy(global_server);
+
     return 0;
 }

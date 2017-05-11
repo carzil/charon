@@ -6,6 +6,7 @@
 #include "defs.h"
 #include "utils/logging.h"
 #include "utils/array.h"
+#include "utils/vector.h"
 
 #define ASSERT_TOKEN(tok) do { if (st->token != tok) { return -CHARON_ERR; } } while (0)
 #define ASSERT_TOKEN_F(tok, label) do { if (st->token != tok) { res = -CHARON_ERR; goto label; } } while (0)
@@ -19,10 +20,6 @@ enum {
 };
 
 typedef struct {
-    enum {
-        st_server_start,
-    } state;
-
     enum {
         t_none,
         t_id,
@@ -45,16 +42,18 @@ typedef struct {
     int line;
     int line_pos;
 
-    config_t* conf;
+    void* conf;
+    conf_section_def_t* conf_def;
 
+    conf_section_def_t* current_section_def;
+    void* current_section;
 } config_state_t;
 
 void config_state_init(config_state_t* state)
 {
-    state->pos = 0;
+    state->pos = -1;
     state->eof = 0;
     state->size = 0;
-    state->state = st_server_start;
     state->line = 1;
     state->line_pos = 0;
     array_init(&state->token_s, 10);
@@ -65,26 +64,17 @@ void config_state_destroy(config_state_t* st)
     array_destroy(&st->token_s);
 }
 
-void config_init(config_t* conf)
-{
-    list_head_init(conf->vhosts);
-}
+#define SECTION_DEF_IS_NOT_NULL(cd) (cd->name != NULL)
+#define FIELD_DEF_IS_NOT_NULL(fd) (fd->name != NULL)
 
-config_t* config_create()
+void config_init(config_state_t* st)
 {
-    config_t* conf = malloc(sizeof(config_t));
-    config_init(conf);
-    return conf;
-}
-
-void config_destroy(config_t* conf)
-{
-    struct list_node* ptr;
-    struct list_node* tmp;
-    list_foreach_safe(&conf->vhosts, ptr, tmp) {
-        vhost_t* p = list_entry(ptr, vhost_t, lnode);
-        vhost_destroy(p);
-        free(p);
+    conf_section_def_t* conf_def = st->conf_def;
+    while (SECTION_DEF_IS_NOT_NULL(conf_def)) {
+        if (conf_def->flags & CONF_ALLOW_MULTIPLE) {
+            vector_init((char*)st->conf + conf_def->offset);
+        }
+        conf_def++;
     }
 }
 
@@ -134,7 +124,18 @@ int _determine_token_type(config_state_t* st)
 {
     char ch;
 
-    while ((ch = read_char(st)) > 0 && isspace(ch));
+    if (st->pos == -1) {
+        st->pos = 0;
+        ch = read_char(st);
+    } else {
+        ch = st->buf[st->pos - 1];
+    }
+
+    // charon_debug("ch = '%c'", ch);
+
+    while (ch > 0 && isspace(ch)) {
+        ch = read_char(st);
+    }
 
     if (ch < 0) {
         return ch;
@@ -148,15 +149,19 @@ int _determine_token_type(config_state_t* st)
         switch (ch) {
         case '=':
             st->token = t_equal;
+            read_char(st);
             break;
         case ';':
             st->token = t_semicolon;
+            read_char(st);
             break;
         case '{':
             st->token = t_open_brace;
+            read_char(st);
             break;
         case '}':
             st->token = t_close_brace;
+            read_char(st);
             break;
         case '"':
         case '\'':
@@ -166,7 +171,7 @@ int _determine_token_type(config_state_t* st)
         }
     }
     if (st->token != t_string) {
-        array_append(&st->token_s, st->buf + st->pos - 1, 1);
+        array_append(&st->token_s, &ch, 1);
     }
     return CHARON_OK;
 }
@@ -175,7 +180,7 @@ int read_while(config_state_t* st)
 {
     int ch;
     while ((ch = read_char(st)) > 0) {
-        if (st->token == t_id && !isalnum(ch)) {
+        if (st->token == t_id && !isalnum(ch) && ch != '$' && ch != '_') {
             break;
         }
         if (st->token == t_digit && !isdigit(ch)) {
@@ -201,6 +206,7 @@ int read_string(config_state_t* st)
     if (ch != st->quote) {
         return UNKNOWN_TOKEN;
     }
+    read_char(st);
     array_append(&st->token_s, "\0", 1);
     return CHARON_OK;
 }
@@ -250,64 +256,115 @@ static inline void copy_token_string(config_state_t* st, string_t* where)
     where->end = where->start + sz;
 }
 
-int config_parse_vhost_field(config_state_t* st, vhost_t* vhost)
+conf_section_def_t* config_find_section_def(conf_section_def_t* sect_def, char* name)
+{
+    while (SECTION_DEF_IS_NOT_NULL(sect_def)) {
+        if (!strcmp(sect_def->name, name)) {
+            return sect_def;
+        }
+        sect_def++;
+    }
+    return NULL;
+}
+
+conf_field_def_t* config_find_field_def(conf_section_def_t* section, char* name)
+{
+    conf_field_def_t* field_def = section->allowed_fields;
+    while (FIELD_DEF_IS_NOT_NULL(field_def)) {
+        if (!strcmp(field_def->name, name)) {
+            return field_def;
+        }
+        field_def++;
+    }
+    return NULL;
+}
+
+int config_parse_string_field(config_state_t* st, conf_field_def_t* field_def)
 {
     int res;
-    char* field_name = array_data(&st->token_s);
-    if (!strcmp(field_name, "name")) {
-        EXPECT_TOKEN(t_string);
-        copy_token_string(st, &vhost->name);
-        EXPECT_TOKEN(t_semicolon);
-    } else if (!strcmp(field_name, "root")) {
-        EXPECT_TOKEN(t_string);
-        copy_token_string(st, &vhost->root);
-        EXPECT_TOKEN(t_semicolon);
-    } else {
-        charon_error("unknown field '%s'", field_name);
-        return -CHARON_ERR;
-    }
+    string_t* str = (string_t*)((char*)st->current_section + field_def->offset);
+
+    EXPECT_TOKEN(t_string);
+    copy_token_string(st, str);
+    EXPECT_TOKEN(t_semicolon);
     return CHARON_OK;
 }
 
-int config_parse_vhost(config_state_t* st, vhost_t** vhost)
+int config_parse_time_interval_field(config_state_t* st, conf_field_def_t* field_def)
+{
+    int res;
+    time_t* val = (time_t*)((char*)st->current_section + field_def->offset);
+
+    EXPECT_TOKEN(t_digit);
+    *val = strtoll(st->token_s.data, NULL, 0);
+    EXPECT_TOKEN(t_id);
+    if (!strcmp(st->token_s.data, "m")) {
+        *val *= 60;
+    }
+    EXPECT_TOKEN(t_semicolon);
+    return CHARON_OK;
+}
+
+int config_parse_field(config_state_t* st, conf_field_def_t* field_def)
+{
+    if (field_def->flags & CONF_STRING) {
+        return config_parse_string_field(st, field_def);
+    } else if (field_def->flags & CONF_TIME_INTERVAL) {
+        return config_parse_time_interval_field(st, field_def);
+    } else {
+        return -CHARON_ERR;
+    }
+}
+
+int config_parse_section(config_state_t* st)
 {
     int res;
     EXPECT_TOKEN(t_open_brace);
-
-    *vhost = vhost_create();
-
     WHILE_TOKEN() {
-        switch (st->token) {
-        case t_id:
-            res = config_parse_vhost_field(st, *vhost);
+        if (st->token == t_id) {
+            conf_field_def_t* field_def = config_find_field_def(st->current_section_def, st->token_s.data);
+            if (field_def == NULL) {
+                charon_error("field '%s' is not allowed here", st->token_s.data);
+                return -CHARON_ERR;
+            }
+            res = config_parse_field(st, field_def);
+            if (res != CHARON_OK) {
+                break;
+            }
+        } else {
             break;
-        default:
-            goto end;
         }
     }
 
-end:
-    ASSERT_TOKEN_F(t_close_brace, err);
-    return CHARON_OK;
-
-err:
-    vhost_destroy(*vhost);
-    *vhost = NULL;
+    ASSERT_TOKEN(t_close_brace);
     return res;
 }
 
 int config_parse(config_state_t* st)
 {
-    int res;
+    int res = -CHARON_ERR;
 
     WHILE_TOKEN() {
-        if (st->token == t_id && !strcmp(st->token_s.data, "vhost")) {
-            vhost_t* vhost;
-            res = config_parse_vhost(st, &vhost);
+        if (st->token == t_id) {
+            st->current_section_def = config_find_section_def(st->conf_def, st->token_s.data);
+            if (st->current_section_def == NULL) {
+                charon_error("unknown section '%s'", st->token_s.data);
+                break;
+            }
+            if (st->current_section_def->flags & CONF_ALLOW_MULTIPLE) {
+                void** v = (void**)((char*)st->conf + st->current_section_def->offset);
+                size_t idx = vector_size(v);
+                __vector_resize(v, idx + 1, st->current_section_def->type_size);
+                st->current_section = (char*)(*v) + st->current_section_def->type_size * idx;
+            } else {
+                st->current_section = (char*)st->conf + st->current_section_def->offset;
+            }
+            res = config_parse_section(st);
             if (res != CHARON_OK) {
                 break;
             }
-            list_insert_last(&st->conf->vhosts, &vhost->lnode);
+        } else {
+            break;
         }
     }
     if (res != -CHARON_EOF) {
@@ -317,20 +374,21 @@ int config_parse(config_state_t* st)
     return CHARON_OK;
 }
 
-int config_open(char* filename, config_t** conf)
+int config_open(char* filename, void* conf, conf_section_def_t* conf_def)
 {
     config_state_t st;
     int res = CHARON_OK;
 
     config_state_init(&st);
     st.fd = open(filename, O_RDONLY);
+    st.conf = conf;
+    st.conf_def = conf_def;
     if (st.fd < 0) {
         charon_perror("open: ");
         res = -CHARON_ERR;
         goto cleanup;
     }
-
-    *conf = st.conf = config_create();
+    config_init(&st);
     res = config_parse(&st);
 
 cleanup:
