@@ -20,13 +20,6 @@
 #include "utils/logging.h"
 #include "utils/string.h"
 
-/*
- * TODO: now it's possible to perform a DoS attack on Charon:
- * hacker can open tons of HTTP-connections and Charon will not
- * close them. Need to create a mechanism to close
- * timed out connections.
- */
-
 worker_t* worker_create(char* conf_filename)
 {
     worker_t* worker = (worker_t*) malloc(sizeof(worker_t));
