@@ -5,24 +5,18 @@
 #include "chain.h"
 #include "utils/array.h"
 
-int conn_init(connection_t* c)
+int conn_init(connection_t* c, worker_t* w, handler_t* h, int fd)
 {
     c->in_epoll = 0;
     c->epoll_flags = 0;
-    c->handler = NULL;
-    c->worker = NULL;
+    c->handler = h;
+    c->worker = w;
+    c->fd = fd;
     event_init(&c->read_ev);
     event_init(&c->write_ev);
     event_init(&c->timeout_ev);
     chain_init(&c->chain);
     return CHARON_OK;
-}
-
-connection_t* conn_create()
-{
-    connection_t* c = malloc(sizeof(connection_t));
-    conn_init(c);
-    return c;
 }
 
 void conn_destroy(connection_t* c)

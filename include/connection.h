@@ -30,7 +30,6 @@ struct connection_s {
 
     chain_t chain;
 
-    void* context;
     handler_t* handler;
     struct worker_s* worker;
 
@@ -41,8 +40,7 @@ struct connection_s {
 
 typedef struct connection_s connection_t;
 
-connection_t* conn_create();
-int conn_init(connection_t* c);
+int conn_init(connection_t* c, struct worker_s* w, handler_t* h, int fd);
 int conn_write(connection_t* c, chain_t* chain);
 void conn_destroy(connection_t* c);
 int conn_read(connection_t* c, buffer_t* buf);

@@ -163,10 +163,7 @@ int worker_accept_client(worker_t* worker, handler_t* handler, connection_t** re
     int enable = 1;
     setsockopt(new_fd, SOL_SOCKET, TCP_CORK, &enable, sizeof(enable));
 
-    c = conn_create();
-    c->fd = new_fd;
-    c->handler = handler;
-    c->worker = worker;
+    c = handler->create_connection(worker, handler, new_fd);
 
     memcpy(&c->addr, &addr, in_addr_len);
     worker_add_connection(worker, c);
@@ -273,12 +270,12 @@ void worker_deferred_event_remove(UNUSED worker_t* worker, event_t* ev)
 void worker_stop_connection(connection_t* c)
 {
     charon_info("connection closed fd=%d", c->fd);
-    if (c->handler) {
-        c->handler->on_connection_end(c);
-    }
     c->worker->connections[c->fd] = NULL;
     close(c->fd);
-    conn_destroy(c);
+    if (c->handler) {
+        c->handler->destroy_connection(c);
+    }
+    free(c);
 }
 
 void worker_add_connection(worker_t* worker, connection_t* c)
@@ -296,8 +293,11 @@ int worker_accept_connections(worker_t* worker, handler_t* handler)
 {
     connection_t* c = NULL;
     int res, cnt = 0;
-    while ((res = worker_accept_client(worker, handler, &c)) == CHARON_OK) {
-        c->handler->on_connection_init(c);
+    for (;;) {
+        res = worker_accept_client(worker, handler, &c);
+        if (res != CHARON_OK) {
+            break;
+        }
         cnt++;
     }
     return cnt;
@@ -310,11 +310,10 @@ void worker_finish(worker_t* worker)
     for (size_t i = 0; i < vector_size(&worker->connections); i++) {
         c = worker->connections[i];
         if (c != NULL) {
-            if (c->handler != NULL) {
-                c->handler->on_connection_end(c);
-            }
             close(c->fd);
-            conn_destroy(c);
+            if (c->handler != NULL) {
+                c->handler->destroy_connection(c);
+            }
         }
     }
 

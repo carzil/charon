@@ -5,6 +5,8 @@
 #include "utils/list.h"
 #include "http/parser.h"
 
+struct http_connection_s;
+
 typedef struct {
     string_t uri;
 
@@ -16,7 +18,7 @@ typedef struct {
 typedef struct {
     connection_t conn;
 
-    connection_t* upstreaming;
+    struct http_connection_s* upstreaming;
     http_upstream_t* upstream;
     chain_t chain_in;
     chain_t chain_out;
@@ -36,7 +38,7 @@ typedef struct {
 } http_upstream_connection_t;
 
 http_upstream_connection_t* http_upstream_connect(http_upstream_t* upstream);
-int http_upstream_bond(http_upstream_connection_t* uc, connection_t* c);
+int http_upstream_bond(http_upstream_connection_t* uc, struct http_connection_s* c);
 void http_upstream_destroy(http_upstream_t* u);
 
 #endif

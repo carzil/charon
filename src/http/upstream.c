@@ -73,7 +73,7 @@ int http_upstream_on_read_body(event_t* ev)
         uc->response_received = 1;
     }
 
-    worker_enable_write(uc->upstreaming);
+    worker_enable_write(&uc->upstreaming->conn);
 
     return CHARON_OK;
 }
@@ -81,15 +81,15 @@ int http_upstream_on_read_body(event_t* ev)
 int http_upstream_on_write_to_client(event_t* ev)
 {
     connection_t* c = ev->data;
-    http_context_t* ctx = c->context;
-    http_upstream_connection_t* uc = ctx->upstream_conn;
+    http_connection_t* hc = http_connection(c);
+    http_upstream_connection_t* uc = hc->upstream_conn;
 
     int res = conn_write(c, &uc->chain_out);
     if (res == CHARON_OK) {
         worker_disable_write(c);
         chain_clear(&uc->chain_out);
         if (uc->response_received) {
-            http_handler_cleanup_connection(c);
+            http_handler_cleanup_connection(hc);
             worker_enable_read(c);
         }
     }
@@ -177,7 +177,7 @@ int http_upstream_on_read(event_t* ev)
         chain_push_buffer(&uc->chain_out, header_buffer);
         buffer_rewind(&uc->recv_buf);
         uc->conn.read_ev.handler = http_upstream_on_read_body;
-        uc->upstreaming->write_ev.handler = http_upstream_on_write_to_client;
+        uc->upstreaming->conn.write_ev.handler = http_upstream_on_write_to_client;
         return http_upstream_on_read_body(ev);
     }
 
@@ -226,7 +226,7 @@ http_upstream_connection_t* http_upstream_make_connection(http_upstream_t* upstr
         return NULL;
     }
     uc = http_upstream_connection_create();
-    conn_init(&uc->conn);
+    conn_init(&uc->conn, NULL, NULL, -1);
     if (conn_connect(&uc->conn, result) != CHARON_OK) {
         close(uc->conn.fd);
         conn_destroy(&uc->conn);
@@ -264,9 +264,8 @@ http_upstream_connection_t* http_upstream_connect(http_upstream_t* upstream)
 
 int http_upstream_proxy_request(http_upstream_connection_t* uc)
 {
-    connection_t* c = uc->upstreaming;
-    http_context_t* ctx = c->context;
-    http_request_t* req = &ctx->request;
+    http_connection_t* hc = uc->upstreaming;
+    http_request_t* req = &hc->request;
 
     buffer_t* buf = buffer_create();
     buffer_malloc(buf, 4096);
@@ -312,15 +311,14 @@ int http_upstream_proxy_request(http_upstream_connection_t* uc)
     return CHARON_OK;
 }
 
-int http_upstream_bond(http_upstream_connection_t* uc, connection_t* c)
+int http_upstream_bond(http_upstream_connection_t* uc, http_connection_t* hc)
 {
     // TODO: clean current buffer
-    http_context_t* ctx = c->context;
-    ctx->upstream_conn = uc;
-    uc->upstreaming = c;
-    uc->conn.worker = c->worker;
-    c->write_ev.handler = http_upstream_on_write_to_client;
-    worker_add_connection(c->worker, &uc->conn);
+    hc->upstream_conn = uc;
+    uc->upstreaming = hc;
+    uc->conn.worker = hc->conn.worker;
+    hc->conn.write_ev.handler = http_upstream_on_write_to_client;
+    worker_add_connection(hc->conn.worker, &uc->conn);
     http_parser_init(&uc->parser, HTTP_PARSE_RESPONSE);
     http_response_init(&uc->resp);
     return http_upstream_proxy_request(uc);

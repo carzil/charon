@@ -8,7 +8,9 @@
 #include "http/vhost.h"
 #include "http/upstream.h"
 
-struct http_context_s {
+struct http_connection_s {
+    connection_t conn;
+
     buffer_t req_buf;
     http_parser_t parser;
     http_request_t request;
@@ -19,24 +21,25 @@ struct http_context_s {
     http_upstream_connection_t* upstream_conn;
 };
 
+typedef struct http_connection_s http_connection_t;
+#define http_connection(ptr) ((http_connection_t*) ptr)
+
 struct http_handler_s {
     handler_t handler;
 
     LIST_HEAD_DECLARE(vhosts);
 };
 
-typedef struct http_context_s http_context_t;
 typedef struct http_handler_s http_handler_t;
 
-#define http_context(ptr) ((http_context_t*) ptr)
 
 http_handler_t* http_handler_on_init();
 void http_handler_on_finish(http_handler_t* h);
 
-int http_handler_connection_init(connection_t* c);
+connection_t* http_handler_connection_init();
 void http_handler_on_connection_end(connection_t* c);
-int http_end_process_request(connection_t* c, http_status_t error);
-void http_handler_cleanup_connection(connection_t* c);
+int http_end_process_request(http_connection_t* c, http_status_t error);
+void http_handler_cleanup_connection(http_connection_t* c);
 
 typedef struct {
     time_t accept_timeout;
