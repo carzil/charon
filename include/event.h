@@ -28,6 +28,9 @@ struct event_s {
     unsigned active:1;
     unsigned delayed:1;
     unsigned in_timer:1;
+    unsigned deferred:1;
+
+    list_node_t lnode;
 };
 
 typedef struct event_s event_t;
@@ -41,6 +44,7 @@ static inline void event_init(event_t* ev)
     ev->expire = -1;
     ev->fd = -1;
     ev->handler = NULL;
+    ev->deferred = 0;
 }
 
 static inline event_t* event_create()

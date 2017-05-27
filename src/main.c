@@ -5,7 +5,7 @@
 #include <string.h>
 
 #include "conf.h"
-#include "server.h"
+#include "worker.h"
 #include "utils/list.h"
 #include "timer.h"
 #include "defs.h"
@@ -19,7 +19,6 @@ void usage()
 
 void sigint_handler(UNUSED int sig)
 {
-    charon_debug("Ctrl+C catched");
     worker_stop(global_server);
 }
 
@@ -32,6 +31,8 @@ int main(int argc, char* argv[])
 {
     int option_index = 0, c;
     char* config_name = NULL;
+
+    signal(SIGPIPE, SIG_IGN);
 
     for (;;) {
         c = getopt_long(argc, argv, "c:", charon_options, &option_index);
@@ -61,9 +62,10 @@ int main(int argc, char* argv[])
     }
 
 
-    // signal(SIGINT, sigint_handler);
 
     global_server = worker_create(config_name);
+
+    signal(SIGINT, sigint_handler);
 
     if (worker_start(global_server, atoi(argv[optind])) == 0) {
         worker_loop(global_server);

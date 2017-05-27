@@ -16,6 +16,7 @@ typedef struct string string_t;
 #define STRING_EMPTY (string_t) { NULL, NULL }
 
 #define string_size(s) ((size_t)((s)->end - (s)->start))
+#define string(s) ((string_t) { s, s + sizeof(s) - 1 } )
 
 static inline void string_clone(string_t* to, string_t* from)
 {
@@ -29,7 +30,7 @@ static inline int string_cmp(string_t* a, string_t* b)
     if (string_size(b) < sz) {
         sz = string_size(b);
     }
-    charon_debug("cmp('%.*s', '%.*s')", (int)string_size(a), a->start, (int)string_size(b), b->start);
+    // charon_debug("cmp('%.*s', '%.*s')", (int)string_size(a), a->start, (int)string_size(b), b->start);
     return strncmp(a->start, b->start, sz);
 }
 

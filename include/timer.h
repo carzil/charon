@@ -4,8 +4,10 @@
 #include <time.h>
 #include <inttypes.h>
 #include "event.h"
-#include "client.h"
+#include "connection.h"
 #include "utils/list.h"
+
+#define TIMER_QUEUE_INVALID_IDX ((size_t) -1)
 
 typedef struct timer_queue_s timer_queue_t;
 

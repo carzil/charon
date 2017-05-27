@@ -4,14 +4,14 @@
 #include "defs.h"
 #include "http/vhost.h"
 
-vhost_t* vhost_create()
+int vhost_init(vhost_t* vhost)
 {
-    vhost_t* vhost = malloc(sizeof(vhost_t));
     vhost->name = STRING_EMPTY;
     vhost->root = STRING_EMPTY;
+    vhost->upstream.uri = STRING_EMPTY;
     buffer_malloc(&vhost->path, PATH_MAX);
     list_head_init(vhost->locations);
-    return vhost;
+    return CHARON_OK;
 }
 
 void vhost_destroy(vhost_t* v)
@@ -19,4 +19,5 @@ void vhost_destroy(vhost_t* v)
     free(v->name.start);
     free(v->root.start);
     free(v->path.start);
+    http_upstream_destroy(&v->upstream);
 }

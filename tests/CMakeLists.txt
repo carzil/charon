@@ -15,5 +15,5 @@ function(charon_test)
     add_test(NAME "charon_${ETEST_NAME}" COMMAND ${ETEST_NAME})
 endfunction()
 
-charon_test(NAME http_parser_test SOURCES http_parser_test.c ${CMAKE_SOURCE_DIR}/src/http_parser.c ${CMAKE_SOURCE_DIR}/src/chain.c)
+charon_test(NAME http_parser_test SOURCES http_parser_test.c ${CMAKE_SOURCE_DIR}/src/http/parser.c ${CMAKE_SOURCE_DIR}/src/chain.c)
 charon_test(NAME vector_test SOURCES vector_test.c)

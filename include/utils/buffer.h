@@ -26,15 +26,17 @@ struct buffer {
     size_t size;
 };
 
-static inline int buffer_init(struct buffer* buffer)
+typedef struct buffer buffer_t;
+
+static inline int buffer_init(buffer_t* buffer)
 {
-    memset(buffer, '\0', sizeof(struct buffer));
+    memset(buffer, '\0', sizeof(buffer_t));
     return CHARON_OK;
 }
 
-static inline struct buffer* buffer_create()
+static inline buffer_t* buffer_create()
 {
-    struct buffer* buffer = (struct buffer*) malloc(sizeof(struct buffer));
+    buffer_t* buffer = (buffer_t*) malloc(sizeof(buffer_t));
     if (!buffer) {
         return NULL;
     }
@@ -42,7 +44,7 @@ static inline struct buffer* buffer_create()
     return buffer;
 }
 
-static inline void buffer_destroy(struct buffer* buffer)
+static inline void buffer_destroy(buffer_t* buffer)
 {
     if (buffer->owning) {
         if (buffer->in_memory) {
@@ -53,9 +55,10 @@ static inline void buffer_destroy(struct buffer* buffer)
     }
 }
 
-#define buffer_size(b) ((b)->end - (b)->start)
+#define buffer_size(b) ((size_t)((b)->end - (b)->start))
+#define buffer_size_last(b) ((size_t)((b)->last - (b)->start))
 
-static inline void buffer_malloc(struct buffer* buf, size_t size)
+static inline void buffer_malloc(buffer_t* buf, size_t size)
 {
     buf->start = malloc(size);
     memset(buf->start, '\0', size);
@@ -65,13 +68,20 @@ static inline void buffer_malloc(struct buffer* buf, size_t size)
     buf->last = buf->start;
 }
 
-static inline void buffer_clean(struct buffer* buf)
+static inline void buffer_clean(buffer_t* buf)
 {
     memset(buf->start, '\0', buf->end - buf->start);
     buf->last = buf->start;
 }
 
-static inline int buffer_string_copy(struct buffer* buf, string_t str)
+static inline void buffer_rewind(buffer_t* buf)
+{
+    memmove(buf->start, buf->start + buf->pos, buffer_size(buf) - buf->pos);
+    buf->last -= buf->pos;
+    buf->pos = 0;
+}
+
+static inline int buffer_string_copy(buffer_t* buf, string_t str)
 {
     size_t sz = string_size(&str);
     if (buf->last + sz > buf->end) {
@@ -81,9 +91,28 @@ static inline int buffer_string_copy(struct buffer* buf, string_t str)
     return CHARON_OK;
 }
 
+static inline void buffer_update_size(buffer_t* buf)
+{
+    buf->size = buf->last - buf->start;
+}
+
+static inline void buffer_memcpy(buffer_t* dest, buffer_t* src)
+{
+    memcpy(dest->start, src->start, buffer_size_last(src));
+}
+
+static inline buffer_t* buffer_deep_copy(buffer_t* buf)
+{
+    buffer_t* copy = buffer_create();
+    buffer_malloc(copy, buffer_size_last(buf));
+    buffer_memcpy(copy, buf);
+    copy->pos = 0;
+    copy->last = copy->start + buffer_size_last(buf);
+    copy->size = buffer_size_last(buf);
+    return copy;
+}
+
 #define buffer_in_file(buf) do { (buf)->in_file = 1; (buf)->in_memory = 0; } while (0)
 #define buffer_in_memory(buf) do { (buf)->in_file = 0; (buf)->in_memory = 1; } while (0)
-
-typedef struct buffer buffer_t;
 
 #endif

@@ -5,7 +5,7 @@ project(charon VERSION 0.1)
 option(CHARON_BUILD_TESTS "Build tests for charon" OFF)
 
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmake)
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=gnu99 -Wall -Wextra -Wpedantic")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=gnu99 -Wall -Wextra")
 set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS} -Wextra -O0 -g -fsanitize=address")
 set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS} -Ofast")
 
@@ -34,11 +34,13 @@ set(SOURCE_FILES
     src/http.c
     src/http/parser.c
     src/http/handler.c
-    src/client.c
+    src/http/upstream.c
+    src/http/vhost.c
+
+    src/connection.c
     src/chain.c
     src/conf.c
-    src/server.c
-    src/http/vhost.c
+    src/worker.c
     src/timer.c
 )
 

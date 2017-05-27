@@ -98,6 +98,12 @@ static inline int __vector_set(void** v, size_t where, void* mem, size_t elem_si
     return CHARON_OK;
 }
 
+static inline void vector_clean(void** v)
+{
+    vector_header_t* h = vector_header(*v);
+    h->size = 0;
+}
+
 static inline void vector_destroy(void** v)
 {
     free(vector_header(*v));
@@ -107,6 +113,8 @@ static inline void vector_destroy(void** v)
 #define vector_init(v) vector_init((void**)(v))
 #define vector_destroy(v) vector_destroy((void**)v)
 #define vector_set(v, where, what, type) __vector_set((void**)v, where, what, sizeof(type))
+#define vector_resize(v, new_size, type) __vector_resize((void**)v, new_size, sizeof(type))
+#define vector_clean(v) vector_clean((void**)v)
 
 #define VECTOR_DEFINE(name, type) type* name
 

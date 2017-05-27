@@ -176,16 +176,19 @@ int _determine_token_type(config_state_t* st)
     return CHARON_OK;
 }
 
-int read_while(config_state_t* st)
+int read_while(config_state_t* st, int ((*is_valid)(int)))
 {
     int ch;
     while ((ch = read_char(st)) > 0) {
-        if (st->token == t_id && !isalnum(ch) && ch != '$' && ch != '_') {
+        if (!is_valid(ch)) {
             break;
         }
-        if (st->token == t_digit && !isdigit(ch)) {
-            break;
-        }
+        // if (st->token == t_id && !isalnum(ch) && ch != '$' && ch != '_') {
+        //     break;
+        // }
+        // if (st->token == t_digit && !isdigit(ch)) {
+        //     break;
+        // }
         array_append(&st->token_s, st->buf + st->pos - 1, 1);
     }
     if (ch < 0 && ch != -CHARON_EOF) {
@@ -211,6 +214,11 @@ int read_string(config_state_t* st)
     return CHARON_OK;
 }
 
+static int is_id_ch(int ch)
+{
+    return isalnum(ch) || ch == '$' || ch == '_';
+}
+
 int read_token(config_state_t* st)
 {
     int res;
@@ -224,11 +232,11 @@ int read_token(config_state_t* st)
 
     switch (st->token) {
     case t_id:
-        res = read_while(st);
+        res = read_while(st, is_id_ch);
         // charon_debug("t_id(\"%s\")", st->token_s.data);
         break;
     case t_digit:
-        res = read_while(st);
+        res = read_while(st, isdigit);
         // charon_debug("t_digit(%s)", st->token_s.data);
         break;
     case t_string:
@@ -296,10 +304,37 @@ int config_parse_time_interval_field(config_state_t* st, conf_field_def_t* field
     time_t* val = (time_t*)((char*)st->current_section + field_def->offset);
 
     EXPECT_TOKEN(t_digit);
-    *val = strtoll(st->token_s.data, NULL, 0);
+    time_t v = strtoll(st->token_s.data, NULL, 0);
     EXPECT_TOKEN(t_id);
-    if (!strcmp(st->token_s.data, "m")) {
-        *val *= 60;
+    if (!strcasecmp(st->token_s.data, "s")) {
+        *val = v;
+    } else if (!strcasecmp(st->token_s.data, "m")) {
+        *val = v * 60;
+    } else if (!strcasecmp(st->token_s.data, "m")) {
+        *val = v * 60 * 60;
+    }
+    EXPECT_TOKEN(t_semicolon);
+    return CHARON_OK;
+}
+
+int config_parse_size_field(config_state_t* st, conf_field_def_t* field_def)
+{
+    int res;
+    time_t* val = (time_t*)((char*)st->current_section + field_def->offset);
+
+    EXPECT_TOKEN(t_digit);
+    size_t v = strtoull(st->token_s.data, NULL, 0);
+    EXPECT_TOKEN(t_id);
+    if (!strcasecmp(st->token_s.data, "b")) {
+        *val = v;
+    } else if (!strcasecmp(st->token_s.data, "kb")) {
+        *val = v * 1024;
+    } else if (!strcasecmp(st->token_s.data, "mb")) {
+        *val = v * 1024 * 1024;
+    } else if (!strcasecmp(st->token_s.data, "gb")) {
+        *val = v * 1024 * 1024 * 1024;
+    } else {
+        return -CHARON_ERR;
     }
     EXPECT_TOKEN(t_semicolon);
     return CHARON_OK;
@@ -307,11 +342,14 @@ int config_parse_time_interval_field(config_state_t* st, conf_field_def_t* field
 
 int config_parse_field(config_state_t* st, conf_field_def_t* field_def)
 {
-    if (field_def->flags & CONF_STRING) {
+    switch (field_def->type) {
+    case CONF_STRING:
         return config_parse_string_field(st, field_def);
-    } else if (field_def->flags & CONF_TIME_INTERVAL) {
+    case CONF_TIME_INTERVAL:
         return config_parse_time_interval_field(st, field_def);
-    } else {
+    case CONF_SIZE:
+        return config_parse_size_field(st, field_def);
+    default:
         return -CHARON_ERR;
     }
 }
@@ -358,6 +396,9 @@ int config_parse(config_state_t* st)
                 st->current_section = (char*)(*v) + st->current_section_def->type_size * idx;
             } else {
                 st->current_section = (char*)st->conf + st->current_section_def->offset;
+            }
+            if (st->current_section_def->type_init != NULL) {
+                st->current_section_def->type_init(st->current_section);
             }
             res = config_parse_section(st);
             if (res != CHARON_OK) {

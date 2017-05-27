@@ -5,24 +5,8 @@
 #include "utils/string.h"
 #include "utils/vector.h"
 #include "chain.h"
+#include "http/status.h"
 
-enum {
-    HTTP_GET = 0,
-    HTTP_POST = 1,
-};
-
-enum {
-    HTTP_OK = 200,
-    HTTP_NOT_FOUND = 404,
-    HTTP_SERVER_ERROR = 500,
-};
-
-#define HTTP_OK_MSG "OK"
-#define HTTP_NOT_FOUND_MSG "Not Found"
-#define HTTP_SERVER_ERROR_MSG "Internal Server Error"
-
-typedef int http_method_t;
-typedef int http_status_t;
 typedef struct http_body_s http_body_t;
 typedef struct http_version_s http_version_t;
 typedef struct http_uri_s http_uri_t;
@@ -31,10 +15,32 @@ typedef struct http_headers_container_s http_headers_container_t;
 typedef struct http_response_s http_response_t;
 typedef struct http_request_s http_request_t;
 
+#define HTTP_VERSION_10 ((http_version_t) { 1, 0 })
+#define HTTP_VERSION_11 ((http_version_t) { 1, 1 })
+
 struct http_version_s {
     int major;
     int minor;
 };
+
+static inline int http_version_equal(http_version_t a, http_version_t b)
+{
+    return a.major == b.major && a.minor == b.minor;
+}
+
+typedef enum {
+    HTTP_GET,
+    HTTP_POST
+} http_method_t;
+
+typedef enum {
+    HTTP_OK = 200,
+    HTTP_NOT_FOUND = 404,
+    HTTP_BAD_REQUEST = 400,
+    HTTP_INTERNAL_ERROR = 500,
+    HTTP_BAD_GATEWAY = 502,
+    HTTP_HEADER_TOO_LARGE = 431
+} http_status_t;
 
 struct http_uri_s {
     string_t scheme;
@@ -51,14 +57,12 @@ struct http_header_s {
 #define HTTP_EMPTY_HEADER (http_header_t) { STRING_EMPTY, STRING_EMPTY }
 
 struct http_request_s {
-    int method;
+    http_method_t method;
     http_uri_t uri;
-    http_version_t http_version;
+    http_version_t version;
 
     size_t body_size;
     chain_t body;
-
-    int parsed:1;
 
     /* headers */
     VECTOR_DEFINE(headers, http_header_t);
@@ -75,9 +79,10 @@ struct http_request_s {
 };
 
 struct http_response_s {
-    int status;
-    char* status_message;
-    http_version_t http_version;
+    http_status_t status;
+    string_t status_message;
+    http_version_t version;
+
     buffer_t* body_buf;
 
     /* headers */
@@ -89,6 +94,7 @@ struct http_response_s {
 static inline void http_request_init(http_request_t* req)
 {
     req->content_length = 0;
+    vector_init(&req->headers);
 }
 
 static inline void http_request_destroy(UNUSED http_request_t* req)
@@ -100,13 +106,33 @@ static inline void http_request_destroy(UNUSED http_request_t* req)
 static inline void http_response_init(http_response_t* resp)
 {
     resp->content_length = 0;
+    resp->body_buf = NULL;
+    resp->status = 0;
+    vector_init(&resp->headers);
 }
 
-static inline void http_response_destroy(UNUSED http_response_t* resp)
+static inline void http_response_destroy(http_response_t* resp)
 {
-
+    vector_destroy(&resp->headers);
 }
 
-#define http_response_set_status(resp, st) do { (resp)->status = st; (resp)->status_message = st##_MSG; } while (0);
+static inline void http_request_clean(http_request_t* req)
+{
+    vector_clean(&req->headers);
+}
+
+static inline void http_response_clean(http_response_t* resp)
+{
+    vector_clean(&resp->headers);
+}
+
+static inline void http_response_set_status(http_response_t* resp, http_status_t st) {
+    resp->status = st;
+    resp->status_message = http_get_status_message(st);
+}
+
+int write_header_s(string_t name, string_t value, buffer_t* buf);
+int write_header_i(string_t name, int value, buffer_t* buf);
+int http_write_status_line(buffer_t* buf, http_version_t version, http_status_t status, string_t status_message);
 
 #endif

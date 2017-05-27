@@ -4,6 +4,7 @@
 #include <fcntl.h>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,8 +15,8 @@
 #include <unistd.h>
 #include <sys/stat.h>
 
-#include "server.h"
-#include "client.h"
+#include "worker.h"
+#include "connection.h"
 #include "http/handler.h"
 #include "utils/logging.h"
 #include "utils/string.h"
@@ -26,9 +27,9 @@ worker_t* worker_create(char* conf_filename)
     worker->socket = -1;
     worker->is_running = 0;
     worker->conf_filename = conf_filename;
-    list_head_init(worker->clients);
     timer_queue_init(&worker->timer_queue);
     vector_init(&worker->connections);
+    list_head_init(worker->deferred_events);
     return worker;
 }
 
@@ -106,6 +107,10 @@ int worker_start(worker_t* worker, int port)
         charon_perror("setsockopt: ");
     }
 
+    if (setsockopt(worker->socket, SOL_SOCKET, SO_REUSEPORT, &enable, sizeof(int)) < 0) {
+        charon_perror("setsockopt: ");
+    }
+
     if (set_fd_non_blocking(worker->socket) == -1) {
         charon_perror("cannot set socket to non-blocking mode: ");
         return 3;
@@ -139,7 +144,7 @@ int worker_start(worker_t* worker, int port)
 
 int worker_accept_client(worker_t* worker, handler_t* handler, connection_t** result)
 {
-    connection_t* client;
+    connection_t* c;
     socklen_t in_addr_len = sizeof(struct sockaddr);
     struct sockaddr addr;
 
@@ -155,22 +160,25 @@ int worker_accept_client(worker_t* worker, handler_t* handler, connection_t** re
         }
     }
 
-    client = conn_create();
-    client->fd = new_fd;
-    client->handler = handler;
-    client->worker = worker;
-    list_insert_last(&worker->clients, &client->node);
-    vector_set(&worker->connections, client->fd, &client, connection_t*);
-    memcpy(&client->addr, &addr, in_addr_len);
+    int enable = 1;
+    setsockopt(new_fd, SOL_SOCKET, TCP_CORK, &enable, sizeof(enable));
 
-    if (!getnameinfo((struct sockaddr*) &client->addr, in_addr_len,
-                    client->hbuf, sizeof(client->hbuf),
-                    client->sbuf, sizeof(client->sbuf),
+    c = conn_create();
+    c->fd = new_fd;
+    c->handler = handler;
+    c->worker = worker;
+
+    memcpy(&c->addr, &addr, in_addr_len);
+    worker_add_connection(worker, c);
+
+    if (!getnameinfo((struct sockaddr*) &c->addr, in_addr_len,
+                    c->hbuf, sizeof(c->hbuf),
+                    c->sbuf, sizeof(c->sbuf),
                     NI_NUMERICHOST | NI_NUMERICSERV)) {
-        charon_info("accepted client from %s:%s (fd=%d)", client->hbuf, client->sbuf, new_fd);
+        charon_info("accepted connection from %s:%s (fd=%d)", c->hbuf, c->sbuf, new_fd);
     }
 
-    *result = client;
+    *result = c;
 
     return CHARON_OK;
 }
@@ -182,6 +190,13 @@ void worker_epoll_event_ctl(worker_t* worker, connection_t* c, event_t* ev, int 
     ctl_event.data.fd = c->fd;
     ctl_event.events = flags;
     if (epoll_ctl(worker->epoll_fd, mode, ev->fd, &ctl_event) < 0) {
+        charon_perror("epoll_ctl: ");
+    }
+}
+
+void worker_epoll_unregister(worker_t* worker, int fd)
+{
+    if (epoll_ctl(worker->epoll_fd, EPOLL_CTL_DEL, fd, NULL) < 0) {
         charon_perror("epoll_ctl: ");
     }
 }
@@ -237,15 +252,44 @@ void worker_delayed_event_remove(worker_t* worker, event_t* ev)
     timer_queue_remove(&worker->timer_queue, ev);
 }
 
+void worker_defer_event(worker_t* worker, event_t* ev)
+{
+    if (!ev->deferred) {
+        charon_debug("deferred added");
+        list_insert_last(&worker->deferred_events, &ev->lnode);
+        ev->deferred = 1;
+    }
+}
+
+void worker_deferred_event_remove(UNUSED worker_t* worker, event_t* ev)
+{
+    if (ev->deferred) {
+        charon_debug("deferred remove");
+        list_remove(&ev->lnode);
+        ev->deferred = 0;
+    }
+}
+
 void worker_stop_connection(connection_t* c)
 {
-    charon_info("connection closed fd=%d, addr=%s:%s", c->fd, c->hbuf, c->sbuf);
-    list_remove(&c->node);
+    charon_info("connection closed fd=%d", c->fd);
+    if (c->handler) {
+        c->handler->on_connection_end(c);
+    }
     c->worker->connections[c->fd] = NULL;
     close(c->fd);
-    c->handler->on_connection_end(c);
     conn_destroy(c);
-    free(c);
+}
+
+void worker_add_connection(worker_t* worker, connection_t* c)
+{
+    vector_set(&worker->connections, c->fd, &c, connection_t*);
+}
+
+void worker_remove_connection(connection_t* c)
+{
+    c->worker->connections[c->fd] = NULL;
+    worker_epoll_unregister(c->worker, c->fd);
 }
 
 int worker_accept_connections(worker_t* worker, handler_t* handler)
@@ -261,14 +305,17 @@ int worker_accept_connections(worker_t* worker, handler_t* handler)
 
 void worker_finish(worker_t* worker)
 {
-    struct list_node* ptr;
-    struct list_node* ptr_safe;
     connection_t* c;
 
-    list_foreach_safe(&worker->clients, ptr, ptr_safe) {
-        c = list_entry(ptr, connection_t, node);
-        close(c->fd);
-        conn_destroy(c);
+    for (size_t i = 0; i < vector_size(&worker->connections); i++) {
+        c = worker->connections[i];
+        if (c != NULL) {
+            if (c->handler != NULL) {
+                c->handler->on_connection_end(c);
+            }
+            close(c->fd);
+            conn_destroy(c);
+        }
     }
 
     charon_info("clients stopped");
@@ -291,11 +338,22 @@ void worker_loop(worker_t* worker)
     struct epoll_event* epoll_event;
     int events_count;
     connection_t* c;
+    list_node_t* ptr;
+    list_node_t* tmp;
 
     worker_init_handlers(worker);
 
     charon_info("started worker loop");
     while (worker->is_running) {
+        charon_debug("processing deferred events");
+        if (!list_empty(&worker->deferred_events)) {
+            list_foreach_safe(&worker->deferred_events, ptr, tmp) {
+                event_t* ev = list_entry(ptr, event_t, lnode);
+                worker_deferred_event_remove(worker, ev);
+                ev->handler(ev);
+            }
+        }
+
         msec_t timeout = -1;
         if (!timer_queue_empty(&worker->timer_queue)) {
             timeout = timer_queue_top(&worker->timer_queue)->expire - get_current_msec();
@@ -333,6 +391,7 @@ void worker_loop(worker_t* worker)
             (ev = timer_queue_top(&worker->timer_queue))->expire <= get_current_msec()) {
             ev->handler(ev);
         }
+
         charon_debug("event loop end");
     }
 

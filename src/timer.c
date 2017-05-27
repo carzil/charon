@@ -77,6 +77,10 @@ event_t* timer_queue_top(timer_queue_t* q)
 
 void timer_queue_remove(timer_queue_t* q, event_t* ev)
 {
+    if (ev->timer_queue_idx == TIMER_QUEUE_INVALID_IDX) {
+        return;
+    }
+
     if (q->size == 1) {
         q->heap[0] = NULL;
         q->size--;
@@ -86,6 +90,8 @@ void timer_queue_remove(timer_queue_t* q, event_t* ev)
         __sift_down(q, ev->timer_queue_idx);
         q->heap[q->size] = NULL;
     }
+
+    ev->timer_queue_idx = TIMER_QUEUE_INVALID_IDX;
 }
 
 void timer_queue_update(timer_queue_t* q, event_t* ev, msec_t expire)
