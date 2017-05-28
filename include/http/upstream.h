@@ -35,10 +35,12 @@ typedef struct {
     unsigned status_line_parsed:1;
     unsigned headers_parsed:1;
     unsigned response_received:1;
+    unsigned discard_response:1;
 } http_upstream_connection_t;
 
 http_upstream_connection_t* http_upstream_connect(http_upstream_t* upstream);
 int http_upstream_bond(http_upstream_connection_t* uc, struct http_connection_s* c);
+void http_upstream_break_off(struct http_connection_s* hc);
 void http_upstream_destroy(http_upstream_t* u);
 
 #endif

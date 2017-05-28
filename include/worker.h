@@ -26,6 +26,7 @@ struct worker_s {
     bool is_running;
     http_handler_t* http_handler;
     char* conf_filename;
+    pid_t worker_pid;
 
     timer_queue_t timer_queue;
     VECTOR_DEFINE(connections, connection_t*);

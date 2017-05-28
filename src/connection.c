@@ -29,7 +29,7 @@ int conn_write_buf(connection_t* client, buffer_t* buf)
     off_t offset;
 
     if (buf->in_memory) {
-        charon_debug("in-memory buffer, pos=%d, size=%zu", buf->pos, buf->size);
+        charon_debug("in-memory buffer, pos=%zu, size=%zu", buf->pos, buf->size);
         while (buf->pos < buf->size) {
             ssize_t count = send(client->fd, buf->start + buf->pos, buf->size, MSG_NOSIGNAL);
             if (count < 0) {

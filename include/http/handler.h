@@ -19,6 +19,8 @@ struct http_connection_s {
     http_header_t header;
 
     http_upstream_connection_t* upstream_conn;
+
+    unsigned force_close:1;
 };
 
 typedef struct http_connection_s http_connection_t;
@@ -36,10 +38,10 @@ typedef struct http_handler_s http_handler_t;
 http_handler_t* http_handler_on_init();
 void http_handler_on_finish(http_handler_t* h);
 
-connection_t* http_handler_connection_init();
 void http_handler_on_connection_end(connection_t* c);
 int http_end_process_request(http_connection_t* c, http_status_t error);
 void http_handler_cleanup_connection(http_connection_t* c);
+int http_prepare_for_next_request(http_connection_t* hc);
 
 typedef struct {
     time_t accept_timeout;

@@ -61,11 +61,21 @@ static inline void buffer_destroy(buffer_t* buffer)
 static inline void buffer_malloc(buffer_t* buf, size_t size)
 {
     buf->start = malloc(size);
-    memset(buf->start, '\0', size);
     buf->in_memory = 1;
     buf->owning = 1;
     buf->end = buf->start + size;
     buf->last = buf->start;
+}
+
+static inline int buffer_realloc(buffer_t* buf, size_t new_size)
+{
+    char* new_ptr = realloc(buf->start, new_size);
+    if (new_ptr == NULL) {
+        return -CHARON_NO_MEM;
+    }
+    buf->start = new_ptr;
+    buf->end = buf->start + new_size;
+    return CHARON_OK;
 }
 
 static inline void buffer_clean(buffer_t* buf)

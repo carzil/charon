@@ -61,9 +61,6 @@ struct http_request_s {
     http_uri_t uri;
     http_version_t version;
 
-    size_t body_size;
-    chain_t body;
-
     /* headers */
     VECTOR_DEFINE(headers, http_header_t);
 
@@ -99,7 +96,6 @@ static inline void http_request_init(http_request_t* req)
 
 static inline void http_request_destroy(UNUSED http_request_t* req)
 {
-    chain_destroy(&req->body);
     vector_destroy(&req->headers);
 }
 

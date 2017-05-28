@@ -41,7 +41,7 @@ buffer_t* make_head(http_response_t* resp)
     return buf;
 }
 
-void http_handler_make_response(http_connection_t* hc)
+int http_handler_make_response(http_connection_t* hc)
 {
     http_response_t* resp = &hc->response;
 
@@ -49,10 +49,17 @@ void http_handler_make_response(http_connection_t* hc)
     resp->version.minor = 1;
 
     buffer_t* buf = make_head(resp);
+
+    if (buf == NULL) {
+        return -CHARON_NO_MEM;
+    }
+
     chain_push_buffer(&hc->conn.chain, buf);
     if (resp->content_length > 0) {
         chain_push_buffer(&hc->conn.chain, resp->body_buf);
     }
+
+    return CHARON_OK;
 }
 
 static char* make_path(http_request_t* req, vhost_t* vhost)
@@ -83,9 +90,14 @@ int make_error_page(http_connection_t* hc, http_status_t error)
     resp_sz += 3 + 1;
     resp_sz += string_size(&status_msg);
 
-    /* FIXME: use realloc if size < resp_sz */
     if (buf->start == NULL) {
         buffer_malloc(buf, resp_sz);
+    }
+
+    if (buffer_size(buf) < resp_sz) {
+        if (buffer_realloc(buf, resp_sz) < 0) {
+            return -CHARON_NO_MEM;
+        }
     }
 
     if (buf->start == NULL) {
@@ -105,10 +117,11 @@ int make_error_page(http_connection_t* hc, http_status_t error)
     buf->size = buffer_size_last(buf);
     buffer_in_memory(buf);
 
-    return CHARON_OK;
+    return http_handler_make_response(hc);
 }
 
-/* This routine is end-point of request processing pipeline.
+/*
+ * This routine is an end-point of request processing pipeline.
  * if error is not 0, it forms an error response with code error.
  */
 int http_end_process_request(http_connection_t* hc, http_status_t error)
@@ -118,30 +131,45 @@ int http_end_process_request(http_connection_t* hc, http_status_t error)
         make_error_page(hc, error);
     }
 
-    http_handler_make_response(hc);
     worker_enable_write(&hc->conn);
-    buffer_rewind(&hc->req_buf);
-    http_handler_cleanup_connection(hc);
 
     return CHARON_OK;
 }
 
-int http_stop_connection(http_connection_t* hc)
+/*
+ * This routine is called when Charon is ready to read new request from connection
+ * or close connection, if close was issued.
+ */
+int http_prepare_for_next_request(http_connection_t* hc)
 {
+    worker_disable_write(&hc->conn);
+    chain_clear(&hc->conn.chain);
+    buffer_rewind(&hc->req_buf);
+    hc->response.body_buf = NULL;
+
+    if (hc->force_close) {
+        worker_stop_connection(&hc->conn);
+        return CHARON_OK;
+    }
+
     if (hc->req_buf.start + hc->req_buf.pos < hc->req_buf.last) {
         worker_defer_event(hc->conn.worker, &hc->conn.read_ev);
     } else {
-        worker_disable_write(&hc->conn);
-        chain_clear(&hc->conn.chain);
-        hc->response.body_buf = NULL;
         if (hc->request.connection == CLOSE || http_version_equal(hc->request.version, HTTP_VERSION_10)) {
             worker_stop_connection(&hc->conn);
         } else {
+            http_handler_cleanup_connection(hc);
             worker_enable_read(&hc->conn);
         }
     }
 
     return CHARON_OK;
+}
+
+int http_force_close_connection(http_connection_t* hc, http_status_t error)
+{
+    hc->force_close = 1;
+    return http_end_process_request(hc, error);
 }
 
 static int process_vhost_local(http_connection_t* hc, vhost_t* vhost)
@@ -156,7 +184,7 @@ static int process_vhost_local(http_connection_t* hc, vhost_t* vhost)
     } else {
         fd = open(path, O_RDONLY);
         if (fd < 0) {
-            return http_end_process_request(hc, HTTP_INTERNAL_ERROR);
+            return http_force_close_connection(hc, HTTP_BAD_REQUEST);
         } else {
             charon_debug("open('%s') = %d, size = %zu", path, fd, st.st_size);
             http_response_set_status(&hc->response, HTTP_OK);
@@ -166,6 +194,7 @@ static int process_vhost_local(http_connection_t* hc, vhost_t* vhost)
             hc->response.body_buf->fd = fd;
             hc->response.body_buf->size = st.st_size;
         }
+        http_handler_make_response(hc);
     }
     return http_end_process_request(hc, 0);
 }
@@ -249,7 +278,7 @@ int http_handler_on_read_headers(event_t* ev)
     count = conn_read(c, &hc->req_buf);
     if (count < 0 && count != -CHARON_BUFFER_FULL) {
         worker_disable_read(c);
-        return http_end_process_request(hc, HTTP_INTERNAL_ERROR);
+        return http_force_close_connection(hc, HTTP_INTERNAL_ERROR);
     }
 
     if (c->eof) {
@@ -271,7 +300,7 @@ int http_handler_on_read_headers(event_t* ev)
             worker_disable_read(c);
             return http_handler_process_request(hc);
         } else {
-            return http_end_process_request(hc, HTTP_BAD_REQUEST);
+            return http_force_close_connection(hc, HTTP_BAD_REQUEST);
         }
     }
 
@@ -296,7 +325,7 @@ int http_handler_on_read_request_line(event_t* ev)
     count = conn_read(c, &hc->req_buf);
     if (count < 0 && count != -CHARON_BUFFER_FULL) {
         worker_disable_read(c);
-        return http_end_process_request(hc, HTTP_INTERNAL_ERROR);
+        return http_force_close_connection(hc, HTTP_INTERNAL_ERROR);
     }
 
     if (c->eof) {
@@ -305,7 +334,7 @@ int http_handler_on_read_request_line(event_t* ev)
     }
 
     charon_debug("readed %d bytes from fd=%d", count, c->fd);
-    charon_debug("content:\n===== [ request dump ] =====\n%*s===== [ request dump ] =====", (int)(hc->req_buf.last - hc->req_buf.start), hc->req_buf.start);
+    charon_debug("content:\n===== [ request dump ] =====\n%.*s===== [ request dump ] =====", (int)(hc->req_buf.last - hc->req_buf.start), hc->req_buf.start);
 
     res = http_parse_request_line(&hc->parser, &hc->req_buf, &req->method, &req->uri, &req->version);
     if (res == HTTP_PARSER_DONE) {
@@ -320,12 +349,12 @@ int http_handler_on_read_request_line(event_t* ev)
         return http_handler_on_read_headers(ev);
     } else if (res < 0) {
         hc->request.connection = CLOSE;
-        return http_end_process_request(hc, HTTP_BAD_REQUEST);
+        return http_force_close_connection(hc, HTTP_BAD_REQUEST);
     }
 
     /* request is still incomplete */
     if (count == -CHARON_BUFFER_FULL) {
-        return http_end_process_request(hc, HTTP_HEADER_TOO_LARGE);
+        return http_force_close_connection(hc, HTTP_HEADER_TOO_LARGE);
     }
 
     return CHARON_OK;
@@ -340,7 +369,7 @@ int http_handler_on_write(event_t* ev)
     if (res != -CHARON_AGAIN && res != CHARON_OK) {
         worker_stop_connection(c);
     } else if (res == CHARON_OK) {
-        http_stop_connection(hc);
+        http_prepare_for_next_request(hc);
     }
     return CHARON_OK;
 }
@@ -348,8 +377,10 @@ int http_handler_on_write(event_t* ev)
 void http_handler_connection_destroy(connection_t* c)
 {
     http_connection_t* hc = http_connection(c);
+    http_upstream_break_off(hc);
     http_parser_destroy(&hc->parser);
     http_request_destroy(&hc->request);
+    http_response_destroy(&hc->response);
     buffer_destroy(&hc->req_buf);
     worker_delayed_event_remove(c->worker, &c->timeout_ev);
     worker_deferred_event_remove(c->worker, &c->read_ev);
@@ -372,6 +403,8 @@ connection_t* http_handler_connection_create(worker_t* w, handler_t* h, int fd)
     http_connection_init(hc);
 
     hc->req_buf.start = NULL;
+    hc->force_close = 0;
+    hc->upstream_conn = NULL;
 
     event_set_connection(&c->read_ev, c);
     event_set_connection(&c->write_ev, c);

@@ -56,6 +56,17 @@ int set_fd_non_blocking(int fd)
     return 0;
 }
 
+int worker_init_handlers(worker_t* worker)
+{
+    worker->http_handler = http_handler_on_init();
+    handler_t* handler = (handler_t*) worker->http_handler;
+    if (config_open(worker->conf_filename, handler->conf, handler->conf_def) != CHARON_OK) {
+        return -CHARON_ERR;
+    }
+    handler->on_config_done(handler);
+    return CHARON_OK;
+}
+
 int worker_start(worker_t* worker, int port)
 {
     struct addrinfo hints;
@@ -120,11 +131,16 @@ int worker_start(worker_t* worker, int port)
         charon_perror("listen: ");
     }
 
-    // epoll preparation
+    return CHARON_OK;
+}
+
+int worker_create_event_loop(worker_t* worker) {
+    int res;
+
     worker->epoll_fd = epoll_create1(0);
-    if (worker->epoll_fd == -1) {
+    if (worker->epoll_fd < 0) {
         charon_perror("epoll_create: ");
-        return 4;
+        return -CHARON_ERR;
     }
 
     struct epoll_event ctl_event;
@@ -132,14 +148,14 @@ int worker_start(worker_t* worker, int port)
     ctl_event.events = EPOLLIN | EPOLLET;
 
     res = epoll_ctl(worker->epoll_fd, EPOLL_CTL_ADD, worker->socket, &ctl_event);
-    if (res == -1) {
+    if (res < 0) {
         charon_perror("epoll_ctl: ");
-        return 4;
+        return -CHARON_ERR;
     }
 
     worker->is_running = true;
 
-    return 0;
+    return worker_init_handlers(worker);
 }
 
 int worker_accept_client(worker_t* worker, handler_t* handler, connection_t** result)
@@ -160,8 +176,8 @@ int worker_accept_client(worker_t* worker, handler_t* handler, connection_t** re
         }
     }
 
-    int enable = 1;
-    setsockopt(new_fd, SOL_SOCKET, TCP_CORK, &enable, sizeof(enable));
+    // int enable = 1;
+    // setsockopt(new_fd, IPPROTO_TCP, TCP_CORK, &enable, sizeof(enable));
 
     c = handler->create_connection(worker, handler, new_fd);
 
@@ -314,6 +330,7 @@ void worker_finish(worker_t* worker)
             if (c->handler != NULL) {
                 c->handler->destroy_connection(c);
             }
+            free(c);
         }
     }
 
@@ -321,14 +338,6 @@ void worker_finish(worker_t* worker)
     http_handler_on_finish(worker->http_handler);
     close(worker->socket);
     charon_info("worker stopped");
-}
-
-void worker_init_handlers(worker_t* worker)
-{
-    worker->http_handler = http_handler_on_init();
-    handler_t* handler = (handler_t*) worker->http_handler;
-    config_open(worker->conf_filename, handler->conf, handler->conf_def);
-    handler->on_config_done(handler);
 }
 
 void worker_loop(worker_t* worker)
@@ -340,17 +349,15 @@ void worker_loop(worker_t* worker)
     list_node_t* ptr;
     list_node_t* tmp;
 
-    worker_init_handlers(worker);
+    worker_create_event_loop(worker);
 
     charon_info("started worker loop");
     while (worker->is_running) {
         charon_debug("processing deferred events");
-        if (!list_empty(&worker->deferred_events)) {
-            list_foreach_safe(&worker->deferred_events, ptr, tmp) {
-                event_t* ev = list_entry(ptr, event_t, lnode);
-                worker_deferred_event_remove(worker, ev);
-                ev->handler(ev);
-            }
+        list_foreach_safe(&worker->deferred_events, ptr, tmp) {
+            event_t* ev = list_entry(ptr, event_t, lnode);
+            worker_deferred_event_remove(worker, ev);
+            ev->handler(ev);
         }
 
         msec_t timeout = -1;

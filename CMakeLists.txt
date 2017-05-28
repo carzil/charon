@@ -46,6 +46,14 @@ set(SOURCE_FILES
 
 add_executable(charon src/main.c ${SOURCE_FILES})
 
+install(TARGETS charon
+    RUNTIME DESTINATION bin
+)
+
+install(FILES conf/main.conf
+    DESTINATION /etc/charon
+)
+
 if(CHARON_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)

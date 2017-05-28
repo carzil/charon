@@ -42,8 +42,9 @@ static inline void charon_log(loglevel_t lvl, const char* fmt, va_list args)
         return;
     }
 
-    strcpy(buffer, lvl_string);
-    offset = lvl_string_size;
+    offset = snprintf(buffer, sizeof(buffer), "[%d] ", getpid());
+    strcpy(buffer + offset, lvl_string);
+    offset += lvl_string_size;
     int count = vsnprintf(buffer + offset, 4096 - offset, fmt, args);
 
     if (count == -1) {

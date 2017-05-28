@@ -21,11 +21,19 @@ chain_t* chain_create()
 
 void chain_destroy(UNUSED chain_t* chain)
 {
+    list_node_t* ptr;
+    list_node_t* tmp;
 
+    list_foreach_safe(&chain->buffers, ptr, tmp) {
+        buffer_t* buf = list_entry(ptr, buffer_t, node);
+        buffer_destroy(buf);
+        free(buf);
+    }
 }
 
 void chain_push_buffer(chain_t* ch, buffer_t* buf)
 {
+    charon_debug("pushed buffer %p to chain %p", buf, ch);
     list_insert_last(&ch->buffers, &buf->node);
 }
 
