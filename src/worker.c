@@ -329,6 +329,7 @@ void worker_finish(worker_t* worker)
             close(c->fd);
             if (c->handler != NULL) {
                 c->handler->destroy_connection(c);
+                charon_debug("handler called");
             }
             free(c);
         }

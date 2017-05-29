@@ -158,6 +158,7 @@ int http_prepare_for_next_request(http_connection_t* hc)
         if (hc->request.connection == CLOSE || http_version_equal(hc->request.version, HTTP_VERSION_10)) {
             worker_stop_connection(&hc->conn);
         } else {
+            charon_debug("keep-alive connection fd=%d", hc->conn.fd);
             http_handler_cleanup_connection(hc);
             worker_enable_read(&hc->conn);
         }
@@ -211,11 +212,13 @@ static int process_vhost_upstream(http_connection_t* hc, vhost_t* vhost)
 
 static int process_vhost_request(http_connection_t* hc, vhost_t* vhost)
 {
-    hc->response.body_buf = buffer_create();
-    hc->response.body_buf->pos = 0;
     if (vhost->root.start != NULL) {
+        charon_debug("process to local");
+        hc->response.body_buf = buffer_create();
+        hc->response.body_buf->pos = 0;
         return process_vhost_local(hc, vhost);
     } else {
+        charon_debug("process to upstream");
         return process_vhost_upstream(hc, vhost);
     }
 }
@@ -233,12 +236,11 @@ int http_handler_process_request(http_connection_t* hc)
     for (size_t i = 0; i < vector_size(&conf->vhosts); i++) {
         vhost_t* vhost = &conf->vhosts[i];
         if (!string_cmp(&vhost->name, &vhost_name)) {
-            charon_debug("request to host '%s'", vhost->name.start);
             return process_vhost_request(hc, vhost);
         }
     }
 
-    /* we didn't found appropriate vhost */
+    charon_debug("no appropriate host found, %.*s", string_size(&vhost_name), vhost_name.start);
     return http_end_process_request(hc, HTTP_BAD_REQUEST);
 }
 
@@ -265,6 +267,23 @@ static int handle_header(http_request_t* request, http_header_t* header)
     } else {
         vector_push(&request->headers, header, http_header_t);
     }
+    return CHARON_OK;
+}
+
+int http_handler_on_read_body(event_t* ev)
+{
+    int res;
+    http_connection_t* hc = ev->data;
+
+    res = http_body_read(&hc->conn, &hc->body);
+
+    if (res == CHARON_OK) {
+        worker_disable_read(&hc->conn);
+        return http_handler_process_request(hc);
+    } else if (res < 0) {
+        return http_end_process_request(hc, HTTP_BAD_GATEWAY);
+    }
+
     return CHARON_OK;
 }
 
@@ -297,8 +316,21 @@ int http_handler_on_read_headers(event_t* ev)
         } else if (res == HTTP_PARSER_DONE) {
             charon_debug("parsed all headers");
             /* we read whole request header */
-            worker_disable_read(c);
-            return http_handler_process_request(hc);
+            if (hc->request.content_length > 0) {
+                http_body_init(&hc->body, &hc->body_chain, hc->request.content_length, 4096);
+                hc->req_buf.pos += http_body_preread(&hc->body, &hc->req_buf, buffer_size_last(&hc->req_buf));
+                if (http_body_done(&hc->body)) {
+                    charon_debug("body done");
+                    worker_disable_read(c);
+                    return http_handler_process_request(hc);
+                } else {
+                    c->read_ev.handler = http_handler_on_read_body;
+                    return http_handler_on_read_body(ev);
+                }
+            } else {
+                worker_disable_read(c);
+                return http_handler_process_request(hc);
+            }
         } else {
             return http_force_close_connection(hc, HTTP_BAD_REQUEST);
         }
@@ -405,6 +437,8 @@ connection_t* http_handler_connection_create(worker_t* w, handler_t* h, int fd)
     hc->req_buf.start = NULL;
     hc->force_close = 0;
     hc->upstream_conn = NULL;
+    hc->request.content_length = 0;
+    chain_init(&hc->body_chain);
 
     event_set_connection(&c->read_ev, c);
     event_set_connection(&c->write_ev, c);
@@ -454,6 +488,7 @@ void http_handler_on_config_done(handler_t* handler)
                 *(buf->last - 1) = '/';
             }
         } else if (vhost->upstream.uri.start) {
+            http_upstream_init(&vhost->upstream);
             charon_debug("vhost '%s' at '%s'", vhost->name.start, vhost->upstream.uri.start);
             char* ch = vhost->upstream.uri.start;
             while (ch != vhost->upstream.uri.end && *ch != ':') {

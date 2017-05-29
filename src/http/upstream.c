@@ -1,4 +1,5 @@
 #include <limits.h>
+
 #include "http/upstream.h"
 #include "worker.h"
 
@@ -10,6 +11,7 @@ http_upstream_connection_t* http_upstream_connection_create()
     uc->response_received = 0;
     uc->resp.content_length = SIZE_MAX;
     uc->upstreaming = NULL;
+    uc->used = 0;
     chain_init(&uc->chain_in);
     chain_init(&uc->chain_out);
     buffer_init(&uc->recv_buf);
@@ -18,8 +20,25 @@ http_upstream_connection_t* http_upstream_connection_create()
     return uc;
 }
 
+void http_upstream_connection_cleanup(http_upstream_connection_t* uc)
+{
+    uc->status_line_parsed = 0;
+    uc->headers_parsed = 0;
+    uc->response_received = 0;
+    uc->resp.content_length = SIZE_MAX;
+    uc->upstreaming = NULL;
+    uc->used = 0;
+    http_body_cleanup(&uc->body);
+    http_parser_init(&uc->parser, HTTP_PARSE_RESPONSE);
+    http_response_clean(&uc->resp);
+    buffer_clean(&uc->recv_buf);
+}
+
 void http_upstream_connection_destroy(http_upstream_connection_t* uc)
 {
+    // if (!uc->used) {
+    //     list_remove(&uc->node);
+    // }
     if (uc->upstreaming != NULL) {
         http_upstream_break_off(uc->upstreaming);
     }
@@ -28,7 +47,13 @@ void http_upstream_connection_destroy(http_upstream_connection_t* uc)
     buffer_destroy(&uc->recv_buf);
     http_parser_destroy(&uc->parser);
     http_response_destroy(&uc->resp);
+    charon_debug("d %p", &uc->resp);
     free(uc->conn.handler);
+}
+
+void http_upstream_init(http_upstream_t* u)
+{
+    list_head_init(u->idle_connections);
 }
 
 void http_upstream_destroy(http_upstream_t* u)
@@ -49,64 +74,72 @@ int http_upstream_discard_body(event_t* ev)
 {
     ssize_t count;
     http_upstream_connection_t* uc = ev->data;
+    /* TODO: move to body.c */
 
     while ((count = conn_read(&uc->conn, &uc->recv_buf)) == -CHARON_BUFFER_FULL) {
-        uc->body_read += count;
     }
 
     return CHARON_OK;
 }
 
-int http_upstream_on_read_body(event_t* ev)
+void http_upstream_connection_put(http_upstream_connection_t* uc)
+{
+    uc->used = 0;
+    http_upstream_connection_cleanup(uc);
+    list_insert_first(&uc->upstream->idle_connections, &uc->node);
+    charon_debug("put %p", uc);
+}
+
+void http_upstream_connection_stop(http_upstream_connection_t* uc)
+{
+    http_upstream_break_off(uc->upstreaming);
+    worker_stop_connection(&uc->conn);
+}
+
+int http_upstream_dummy_read(event_t* ev)
 {
     ssize_t count;
     http_upstream_connection_t* uc = ev->data;
+
+    count = conn_read(&uc->conn, &uc->recv_buf);
+
+    if (count == 0 && uc->conn.eof) {
+        charon_debug("upstream closed connection fd=%d", uc->conn.fd);
+    } else {
+        charon_debug("unexpected data from upstream fd=%d", uc->conn.fd);
+        http_upstream_connection_stop(uc);
+    }
+
+    return CHARON_OK;
+}
+
+int http_upstream_body_done(http_upstream_connection_t* uc)
+{
+    charon_debug("read whole body from fd=%d", uc->conn.fd);
+    uc->response_received = 1;
+    uc->conn.read_ev.handler = http_upstream_dummy_read;
+    worker_enable_read(&uc->conn);
+    return http_end_process_request(uc->upstreaming, 0);
+}
+
+int http_upstream_on_read_body(event_t* ev)
+{
+    int res;
+    http_upstream_connection_t* uc = ev->data;
+    connection_t* c = &uc->conn;
 
     if (uc->discard_response) {
         uc->conn.read_ev.handler = http_upstream_discard_body;
         return http_upstream_discard_body(ev);
     }
 
-    /* FIXME: if upstream can send another data after body */
-    while ((count = conn_read(&uc->conn, &uc->recv_buf)) == -CHARON_BUFFER_FULL) {
-        buffer_t* copy = buffer_deep_copy(&uc->recv_buf);
-        buffer_update_size(copy);
-        chain_push_buffer(&uc->chain_out, copy);
-        uc->body_read += buffer_size(&uc->recv_buf);
-        uc->recv_buf.pos = buffer_size(&uc->recv_buf);
-        buffer_rewind(&uc->recv_buf);
-        charon_debug("%zu", buffer_size_last(&uc->recv_buf));
-    }
+    res = http_body_read(c, &uc->body);
 
-    if (count < 0) {
-        worker_disable_read(&uc->conn);
-        worker_stop_connection(&uc->conn);
+    if (res == CHARON_OK) {
+        return http_upstream_body_done(uc);
+    } else if (res < 0) {
+        http_upstream_connection_stop(uc);
         return http_end_process_request(uc->upstreaming, HTTP_BAD_GATEWAY);
-    }
-
-    uc->body_read += count;
-
-    charon_debug("%zu/%zu", uc->body_read, uc->resp.content_length);
-
-    if (!http_version_equal(uc->resp.version, HTTP_VERSION_10)) {
-        if (uc->body_read >= uc->resp.content_length) {
-            buffer_t* copy = buffer_deep_copy(&uc->recv_buf);
-            buffer_rewind(&uc->recv_buf);
-            buffer_update_size(copy);
-            chain_push_buffer(&uc->chain_out, copy);
-            /* despite we read whole response from upstream,
-             * we cannot enable read on upstreaming connection, because
-             * new request can be "mixed" with old one */
-            uc->response_received = 1;
-        }
-    }
-
-    if (uc->conn.eof) {
-        uc->response_received = 1;
-    }
-
-    if (uc->response_received) {
-        return http_end_process_request(uc->upstreaming, 0);
     }
 
     return CHARON_OK;
@@ -123,9 +156,7 @@ int http_upstream_on_write_to_client(event_t* ev)
         worker_disable_write(c);
         chain_clear(&uc->chain_out);
         if (uc->response_received) {
-            if (uc->conn.eof) {
-                worker_stop_connection(&uc->conn);
-            }
+            http_upstream_connection_stop(uc);
             return http_prepare_for_next_request(hc);
         }
     }
@@ -169,17 +200,10 @@ int http_upstream_on_read(event_t* ev)
 
     if (count < 0 && count != -CHARON_BUFFER_FULL) {
         worker_disable_read(&uc->conn);
-        http_end_process_request(uc->upstreaming, HTTP_BAD_GATEWAY);
-        return CHARON_OK;
+        http_upstream_connection_stop(uc);
+        return http_end_process_request(hc, HTTP_BAD_GATEWAY);
     } else if (count == 0 && uc->conn.eof) {
-        charon_debug("%p %p", uc->recv_buf.last, uc->recv_buf.start + uc->recv_buf.pos);
-        /* upstream closed connection */
-        /* FIXME: need to check if request is formed */
-        charon_debug("== [proxy response dump] ==\n%.*s==========================",
-            (int)(uc->recv_buf.last - uc->recv_buf.start),
-            uc->recv_buf.start
-        );
-        worker_stop_connection(&uc->conn);
+        http_upstream_connection_stop(uc);
         return CHARON_OK;
     }
 
@@ -213,10 +237,16 @@ int http_upstream_on_read(event_t* ev)
         buffer_t* header_buffer = make_head(uc);
         chain_push_buffer(&uc->chain_out, header_buffer);
         buffer_rewind(&uc->recv_buf);
-        uc->body_read = buffer_size_last(&uc->recv_buf);
-        uc->conn.read_ev.handler = http_upstream_on_read_body;
         uc->upstreaming->conn.write_ev.handler = http_upstream_on_write_to_client;
-        return http_upstream_on_read_body(ev);
+        http_body_init(&uc->body, &uc->chain_out, uc->resp.content_length, 4096);
+        http_body_preread(&uc->body, &uc->recv_buf, buffer_size_last(&uc->recv_buf));
+        if (http_body_done(&uc->body)) {
+            /* whole body is in header buffer */
+            return http_upstream_body_done(uc);
+        } else {
+            uc->conn.read_ev.handler = http_upstream_on_read_body;
+            return http_upstream_on_read_body(ev);
+        }
     } else {
         return http_end_process_request(hc, HTTP_BAD_GATEWAY);
     }
@@ -225,8 +255,8 @@ int http_upstream_on_read(event_t* ev)
 
 err:
     if (res < 0) {
-        http_end_process_request(uc->upstreaming, HTTP_BAD_GATEWAY);
-        worker_stop_connection(&uc->conn);
+        http_upstream_connection_stop(uc);
+        return http_end_process_request(hc, HTTP_BAD_GATEWAY);
     }
 
     return CHARON_OK;
@@ -293,16 +323,19 @@ cleanup:
 
 http_upstream_connection_t* http_upstream_connect(http_upstream_t* upstream)
 {
-    // connection_t* result = NULL;
+    http_upstream_connection_t* result = http_upstream_make_connection(upstream);;
 
     // if (list_empty(&upstream->idle_connections)) {
     //     result = http_upstream_make_connection(upstream);
-    //     list_insert_first(&upstream->connections, &result->node);
+    //     charon_debug("new connection at %p", result);
     // } else {
-    //     result = list_first_entry(&upstream->idle_connections, connection_t, node);
+    //     result = list_first_entry(upstream->idle_connections, http_upstream_connection_t, node);
+    //     charon_debug("reusing connection fd=%d, %p", 0, result);
     // }
 
-    return http_upstream_make_connection(upstream);
+    result->used = 1;
+
+    return result;
 }
 
 int http_upstream_proxy_request(http_upstream_connection_t* uc)
@@ -338,7 +371,12 @@ int http_upstream_proxy_request(http_upstream_connection_t* uc)
         write_header_s(req->headers[i].name, req->headers[i].value, buf);
     }
 
+    write_header_s(string("Connection"), string("close"), buf);
     write_header_s(string("Host"), req->host, buf);
+
+    if (req->content_length > 0) {
+        write_header_i(string("Content-Length"), req->content_length, buf);
+    }
 
     *buf->last++ = '\r';
     *buf->last++ = '\n';
@@ -348,6 +386,7 @@ int http_upstream_proxy_request(http_upstream_connection_t* uc)
     );
 
     chain_push_buffer(&uc->chain_in, buf);
+    chain_link_chain(&uc->chain_in, &hc->body_chain);
     buffer_update_size(buf);
     worker_enable_write(&uc->conn);
 
@@ -357,15 +396,14 @@ int http_upstream_proxy_request(http_upstream_connection_t* uc)
 int http_upstream_bond(http_upstream_connection_t* uc, http_connection_t* hc)
 {
     // TODO: clean current buffer
+    http_upstream_connection_cleanup(uc);
     hc->upstream_conn = uc;
     uc->upstreaming = hc;
     uc->discard_response = 0;
-    uc->body_read = 0;
     uc->conn.worker = hc->conn.worker;
+    hc->conn.read_ev.handler = http_upstream_on_read;
     hc->conn.write_ev.handler = http_upstream_on_write_to_client;
     worker_add_connection(hc->conn.worker, &uc->conn);
-    http_parser_init(&uc->parser, HTTP_PARSE_RESPONSE);
-    http_response_init(&uc->resp);
     return http_upstream_proxy_request(uc);
 }
 

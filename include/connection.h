@@ -43,8 +43,10 @@ typedef struct connection_s connection_t;
 int conn_init(connection_t* c, struct worker_s* w, handler_t* h, int fd);
 int conn_write(connection_t* c, chain_t* chain);
 void conn_destroy(connection_t* c);
-int conn_read(connection_t* c, buffer_t* buf);
+size_t conn_read_max(connection_t* c, buffer_t* buf, size_t max);
 int conn_connect(connection_t* c, struct addrinfo* addrinfo);
+
+#define conn_read(c, buf) (conn_read_max(c, buf, buffer_size(buf)))
 
 static inline void event_set_connection(event_t* ev, connection_t* c)
 {

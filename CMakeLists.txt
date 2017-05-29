@@ -36,6 +36,7 @@ set(SOURCE_FILES
     src/http/handler.c
     src/http/upstream.c
     src/http/vhost.c
+    src/http/body.c
 
     src/connection.c
     src/chain.c
@@ -52,6 +53,10 @@ install(TARGETS charon
 
 install(FILES conf/main.conf
     DESTINATION /etc/charon
+)
+
+install(FILES charon.service
+    DESTINATION /usr/lib/systemd/system
 )
 
 if(CHARON_BUILD_TESTS)

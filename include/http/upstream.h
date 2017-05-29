@@ -4,6 +4,7 @@
 #include "connection.h"
 #include "utils/list.h"
 #include "http/parser.h"
+#include "http/body.h"
 
 struct http_connection_s;
 
@@ -18,6 +19,8 @@ typedef struct {
 typedef struct {
     connection_t conn;
 
+    list_node_t node;
+
     struct http_connection_s* upstreaming;
     http_upstream_t* upstream;
     chain_t chain_in;
@@ -29,18 +32,19 @@ typedef struct {
     http_response_t resp;
 
     http_header_t header;
-
-    size_t body_read;
+    http_body_t body;
 
     unsigned status_line_parsed:1;
     unsigned headers_parsed:1;
     unsigned response_received:1;
     unsigned discard_response:1;
+    unsigned used:1;
 } http_upstream_connection_t;
 
 http_upstream_connection_t* http_upstream_connect(http_upstream_t* upstream);
 int http_upstream_bond(http_upstream_connection_t* uc, struct http_connection_s* c);
 void http_upstream_break_off(struct http_connection_s* hc);
+void http_upstream_init(http_upstream_t* u);
 void http_upstream_destroy(http_upstream_t* u);
 
 #endif

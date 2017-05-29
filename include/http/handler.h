@@ -17,6 +17,8 @@ struct http_connection_s {
     http_response_t response;
 
     http_header_t header;
+    http_body_t body;
+    chain_t body_chain;
 
     http_upstream_connection_t* upstream_conn;
 

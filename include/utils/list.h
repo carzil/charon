@@ -3,6 +3,8 @@
 
 #include <stddef.h>
 
+#include "utils/logging.h"
+
 struct list_node {
     struct list_node* next;
     struct list_node* prev;
@@ -49,7 +51,6 @@ static inline void list_rotate_left(struct list_node* node)
     __list_delete(node->prev, node->next);
     list_insert_first(first, node);
 }
-
 
 #define list_entry(ptr, type, node_field) ((type*) (((char*)ptr) - offsetof(type, node_field)) )
 #define list_first_entry(head, type, node_field) (list_entry(head.next, type, node_field))

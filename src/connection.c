@@ -85,16 +85,25 @@ int conn_write(connection_t* c, chain_t* chain)
  * If buffer is full, -CHARON_BUFFER_FULL is returned.
  * Returns amount of read bytes. If EOF reached, c->eof is set.
  */
-int conn_read(connection_t* c, buffer_t* buf)
+size_t conn_read_max(connection_t* c, buffer_t* buf, size_t max_size)
 {
     ssize_t sum = 0, count;
-    size_t avail_space;
+    size_t avail_space, recv_sz;
+
+    if (max_size == 0) {
+        return 0;
+    }
+
     for (;;) {
         avail_space = buf->end - buf->last;
         if (!avail_space) {
             return -CHARON_BUFFER_FULL;
         }
-        count = recv(c->fd, buf->last, buf->end - buf->last, 0);
+        recv_sz = buf->end - buf->last;
+        if (recv_sz > max_size) {
+            recv_sz = max_size;
+        }
+        count = recv(c->fd, buf->last, recv_sz, 0);
         if (count < 0) {
             if (errno == EAGAIN) {
                 break;
@@ -104,11 +113,13 @@ int conn_read(connection_t* c, buffer_t* buf)
             }
         } else if (count == 0) {
             /* read returned 0, it is EOF */
+            charon_debug("got eof on fd=%d", c->fd);
             c->eof = 1;
             break;
         } else {
             sum += count;
             buf->last += count;
+            max_size -= count;
         }
     }
     buffer_update_size(buf);

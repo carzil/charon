@@ -132,18 +132,23 @@ int main(int argc, char* argv[])
 
     signal(SIGINT, sigint_handler);
 
+    atexit(remove_pidfile);
+
     if (worker_start(global_server, atoi(argv[optind])) == 0) {
-        spawn_workers(2);
+        global_server->worker_pid = getpid();
+        worker_loop(global_server);
+        worker_destroy(global_server);
+        // spawn_workers(2);
     } else {
         err = 1;
         goto error;
     }
 
-    atexit(remove_pidfile);
 
-    for (int i = 0; i < 2; i++) {
-        wait(NULL);
-    }
+    // for (int i = 0; i < 2; i++) {
+    //     wait(NULL);
+    // }
+    return 0;
 
 error:
     charon_error("cannot start charon");

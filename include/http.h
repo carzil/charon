@@ -7,7 +7,6 @@
 #include "chain.h"
 #include "http/status.h"
 
-typedef struct http_body_s http_body_t;
 typedef struct http_version_s http_version_t;
 typedef struct http_uri_s http_uri_t;
 typedef struct http_header_s http_header_t;

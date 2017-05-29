@@ -37,6 +37,16 @@ void chain_push_buffer(chain_t* ch, buffer_t* buf)
     list_insert_last(&ch->buffers, &buf->node);
 }
 
+void chain_link_chain(chain_t* ch, chain_t* l)
+{
+    list_node_t* ptr;
+    list_node_t* tmp;
+
+    list_foreach_safe(&l->buffers, ptr, tmp) {
+        list_insert_last(&ch->buffers, ptr);
+    }
+}
+
 void chain_clear(chain_t* ch)
 {
     list_node_t* ptr;
