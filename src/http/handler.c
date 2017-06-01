@@ -300,11 +300,6 @@ int http_handler_on_read_headers(event_t* ev)
         return http_force_close_connection(hc, HTTP_INTERNAL_ERROR);
     }
 
-    if (c->eof) {
-        worker_stop_connection(c);
-        return CHARON_OK;
-    }
-
     for (;;) {
         res = http_parse_header(&hc->parser, &hc->req_buf, &hc->header);
         if (res == HTTP_PARSER_OK) {
@@ -358,11 +353,6 @@ int http_handler_on_read_request_line(event_t* ev)
     if (count < 0 && count != -CHARON_BUFFER_FULL) {
         worker_disable_read(c);
         return http_force_close_connection(hc, HTTP_INTERNAL_ERROR);
-    }
-
-    if (c->eof) {
-        worker_stop_connection(c);
-        return CHARON_OK;
     }
 
     charon_debug("readed %d bytes from fd=%d", count, c->fd);
