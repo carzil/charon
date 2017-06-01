@@ -5,7 +5,7 @@ After=network.target
 [Service]
 Type=simple
 PIDFile=/run/charon.pid
-ExecStart=/usr/local/bin/charon -p /run/charon.pid -c /etc/charon/main.conf 8080
+ExecStart=/usr/local/bin/charon -p /run/charon.pid -c /etc/charon/main.conf
 KillMode=mixed
 
 [Install]
