@@ -41,7 +41,7 @@ static inline void charon_log(loglevel_t lvl, const char* fmt, va_list args)
         lvl_string_size = 6;
         break;
     case FATAL:
-        lvl_string = "[fatal]:";
+        lvl_string = "[emerg]:";
         lvl_string_size = 8;
         break;
     case PERROR:
