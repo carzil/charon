@@ -1,11 +1,11 @@
 [Unit]
-Description=HTTP reverse proxy 
+Description=HTTP reverse proxy
 After=network.target
 
 [Service]
 Type=simple
 PIDFile=/run/charon.pid
-ExecStart=/usr/local/bin/charon -p /run/charon.pid -c /etc/charon/main.conf
+ExecStart=/usr/local/bin/charon -p /run/charon.pid -c /etc/charon/charon.conf
 KillMode=mixed
 
 [Install]

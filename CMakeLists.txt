@@ -51,8 +51,12 @@ install(TARGETS charon
     RUNTIME DESTINATION bin
 )
 
-install(FILES conf/main.conf
+install(FILES conf/charon.conf
     DESTINATION /etc/charon
+)
+
+install(FILES site/index.html
+    DESTINATION /var/www/charon
 )
 
 install(FILES charon.service
