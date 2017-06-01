@@ -9,8 +9,8 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=gnu99 -Wall -Wextra")
 set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS} -Wextra -O0 -g -fsanitize=address")
 set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS} -Ofast")
 
-add_definitions(-DCHARON_DEBUG)
 if (CMAKE_BUILD_TYPE MATCHES DEBUG)
+    add_definitions(-DCHARON_DEBUG)
 endif()
 
 include_directories(
