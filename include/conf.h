@@ -16,6 +16,7 @@ typedef struct {
         CONF_STRING,
         CONF_TIME_INTERVAL,
         CONF_SIZE,
+        CONF_INTEGER,
     } type;
     size_t offset;
 } conf_field_def_t;
@@ -29,6 +30,11 @@ typedef struct {
     size_t offset;
 } conf_section_def_t;
 
-int config_open(char* filename, void* conf, conf_section_def_t* conf_def);
+typedef struct {
+    void* conf;
+    conf_section_def_t* sections;
+} conf_def_t;
+
+int config_open(char* filename, conf_def_t* c);
 
 #endif

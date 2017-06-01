@@ -323,7 +323,7 @@ cleanup:
 
 http_upstream_connection_t* http_upstream_connect(http_upstream_t* upstream)
 {
-    http_upstream_connection_t* result = http_upstream_make_connection(upstream);;
+    http_upstream_connection_t* result = http_upstream_make_connection(upstream);
 
     // if (list_empty(&upstream->idle_connections)) {
     //     result = http_upstream_make_connection(upstream);
@@ -332,8 +332,9 @@ http_upstream_connection_t* http_upstream_connect(http_upstream_t* upstream)
     //     result = list_first_entry(upstream->idle_connections, http_upstream_connection_t, node);
     //     charon_debug("reusing connection fd=%d, %p", 0, result);
     // }
-
-    result->used = 1;
+    if (result != NULL) {
+        result->used = 1;
+    }
 
     return result;
 }

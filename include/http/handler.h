@@ -37,8 +37,8 @@ struct http_handler_s {
 typedef struct http_handler_s http_handler_t;
 
 
-http_handler_t* http_handler_on_init();
-void http_handler_on_finish(http_handler_t* h);
+http_handler_t* http_handler_create();
+void http_handler_destroy(http_handler_t* h);
 
 void http_handler_on_connection_end(connection_t* c);
 int http_end_process_request(http_connection_t* c, http_status_t error);

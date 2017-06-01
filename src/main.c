@@ -14,15 +14,22 @@
 
 worker_t* global_server = NULL;
 char* pidfile = NULL;
+volatile int term_signal = 0;
+volatile int alarm_signal = 0;
 
 void usage()
 {
     fprintf(stderr, "Usage: charon -c file PORT\n");
 }
 
-void sigint_handler(UNUSED int sig)
+void stop_signal_handler(UNUSED int sig)
 {
-    worker_stop(global_server);
+    term_signal = 1;
+}
+
+void alarm_signal_handler(UNUSED int sig)
+{
+    alarm_signal = 1;
 }
 
 static struct option charon_options[] = {
@@ -30,21 +37,6 @@ static struct option charon_options[] = {
     { "pidfile", required_argument, NULL, 'p' },
     { NULL, 0, NULL, 0 }
 };
-
-int spawn_workers(int n)
-{
-    for (int i = 0; i < n; i++) {
-        pid_t wpid = fork();
-        if (wpid == 0) {
-            global_server->worker_pid = getpid();
-            worker_loop(global_server);
-            worker_destroy(global_server);
-            exit(0);
-        }
-    }
-
-    return CHARON_OK;
-}
 
 void remove_pidfile()
 {
@@ -57,7 +49,7 @@ int create_pidfile()
 
     if (fd < 0) {
         if (errno == EEXIST) {
-            charon_error("pidfile already exists");
+            charon_fatal("pidfile already exists");
             return -CHARON_ERR;
         } else {
             charon_perror("cannot open pidfile: ");
@@ -75,6 +67,24 @@ int create_pidfile()
     fclose(out);
 
     return CHARON_OK;
+}
+
+void terminate_workers()
+{
+    charon_info("terminating children");
+    worker_kill_all(global_server, SIGTERM);
+    alarm(1);
+    for (;;) {
+        int res = worker_wait_all(global_server);
+        if (res == CHARON_OK) {
+            charon_info("all children exited");
+            break;
+        }
+        if (alarm_signal) {
+            charon_info("terminating timed out, killing children");
+            worker_kill_all(global_server, SIGKILL);
+        }
+    }
 }
 
 int main(int argc, char* argv[])
@@ -101,57 +111,79 @@ int main(int argc, char* argv[])
             break;
         default:
             err = 1;
-            goto error;
+            goto cleanup;
         }
-    }
-
-    if (optind >= argc) {
-        charon_error("no port provided");
-        err = 1;
-        goto error;
     }
 
     if (config_name == NULL) {
         charon_error("no config file provided");
         err = 1;
-        goto error;
+        goto cleanup;
     }
 
     if (pidfile == NULL) {
         charon_error("no pidfile provided");
         err = 1;
-        goto error;
+        goto cleanup;
     }
 
     if (create_pidfile() != CHARON_OK) {
         err = 1;
-        goto error;
+        goto cleanup;
     }
-
-    global_server = worker_create(config_name);
-
-    signal(SIGINT, sigint_handler);
 
     atexit(remove_pidfile);
 
-    if (worker_start(global_server, atoi(argv[optind])) == 0) {
-        global_server->worker_pid = getpid();
-        worker_loop(global_server);
-        worker_destroy(global_server);
-        // spawn_workers(2);
-    } else {
+    global_server = worker_create();
+    if (global_server == NULL) {
         err = 1;
-        goto error;
+        goto cleanup;
+    }
+
+    if (worker_configure(global_server, config_name) != CHARON_OK) {
+        err = 1;
+        goto cleanup;
+    }
+
+    if (worker_start(global_server) != CHARON_OK) {
+        err = 1;
+        goto cleanup;
     }
 
 
-    // for (int i = 0; i < 2; i++) {
-    //     wait(NULL);
-    // }
-    return 0;
+    worker_spawn_all(global_server);
 
-error:
-    charon_error("cannot start charon");
+    struct sigaction sigact = {
+        .sa_flags = 0,
+        .sa_handler = stop_signal_handler
+    };
+    sigaction(SIGINT, &sigact, NULL);
+    sigaction(SIGTERM, &sigact, NULL);
+
+    sigact.sa_handler = alarm_signal_handler;
+    sigaction(SIGALRM, &sigact, NULL);
+
+    for (;;) {
+        int res = worker_wait_all(global_server);
+        if (res == CHARON_OK) {
+            break;
+        }
+        if (term_signal) {
+            charon_info("received stop signal");
+            terminate_workers();
+            break;
+        }
+    }
+
+cleanup:
+    if (global_server != NULL) {
+        worker_destroy(global_server);
+    }
+
+    if (err) {
+        charon_fatal("cannot spawn workers");
+    }
 
     return err;
+
 }

@@ -11,7 +11,7 @@ typedef void (*connection_destroyer_t)(struct connection_s*);
 typedef struct handler_s {
     struct connection_s* (*create_connection)(struct worker_s*, struct handler_s*, int fd);
     connection_destroyer_t destroy_connection;
-    void (*on_config_done)(struct handler_s*);
+    int (*on_config_done)(struct handler_s*);
 
     conf_section_def_t* conf_def;
     void* conf;

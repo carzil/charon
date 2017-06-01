@@ -14,6 +14,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 
 #include "worker.h"
 #include "connection.h"
@@ -21,22 +22,32 @@
 #include "utils/logging.h"
 #include "utils/string.h"
 
-worker_t* worker_create(char* conf_filename)
+int worker_init_handlers(worker_t* worker)
+{
+    worker->http_handler = http_handler_create();
+    return CHARON_OK;
+}
+
+worker_t* worker_create()
 {
     worker_t* worker = (worker_t*) malloc(sizeof(worker_t));
     worker->socket = -1;
     worker->is_running = 0;
-    worker->conf_filename = conf_filename;
     timer_queue_init(&worker->timer_queue);
     vector_init(&worker->connections);
+    vector_init(&worker->children);
     list_head_init(worker->deferred_events);
+    worker_init_handlers(worker);
     return worker;
 }
 
 void worker_destroy(worker_t* worker)
 {
+    http_handler_destroy(worker->http_handler);
     timer_queue_destroy(&worker->timer_queue);
     vector_destroy(&worker->connections);
+    vector_destroy(&worker->children);
+    free(worker->http_handler);
     free(worker);
 }
 
@@ -56,18 +67,44 @@ int set_fd_non_blocking(int fd)
     return 0;
 }
 
-int worker_init_handlers(worker_t* worker)
+int worker_conf_init(worker_conf_t* conf)
 {
-    worker->http_handler = http_handler_on_init();
-    handler_t* handler = (handler_t*) worker->http_handler;
-    if (config_open(worker->conf_filename, handler->conf, handler->conf_def) != CHARON_OK) {
-        return -CHARON_ERR;
-    }
-    handler->on_config_done(handler);
+    conf->port = 0;
+    conf->workers = 0;
+    conf->parsed = 1;
     return CHARON_OK;
 }
 
-int worker_start(worker_t* worker, int port)
+static conf_field_def_t main_fields_def[] = {
+    { "port", CONF_INTEGER, offsetof(worker_conf_t, port) },
+    { "workers", CONF_INTEGER, offsetof(worker_conf_t, workers) },
+    { NULL, 0, 0 }
+};
+
+static conf_section_def_t worker_conf_def[] = {
+    { "main", 0, main_fields_def, (conf_type_init_t) worker_conf_init, sizeof(worker_conf_t), 0 },
+    { NULL, 0, NULL, NULL, 0, 0},
+};
+
+int worker_configure(worker_t* worker, char* conf_filename)
+{
+    handler_t* handler = (handler_t*) worker->http_handler;
+    conf_def_t conf_def[] = {
+        { &worker->conf, worker_conf_def },
+        { worker->http_handler->handler.conf, worker->http_handler->handler.conf_def },
+        { NULL, NULL }
+    };
+    if (config_open(conf_filename, conf_def) != CHARON_OK) {
+        return -CHARON_ERR;
+    }
+    if (!worker->conf.parsed) {
+        charon_error("'main' section is required");
+        return -CHARON_ERR;
+    }
+    return handler->on_config_done(handler);
+}
+
+int worker_start(worker_t* worker)
 {
     struct addrinfo hints;
     struct addrinfo* result;
@@ -78,7 +115,7 @@ int worker_start(worker_t* worker, int port)
     hints.ai_flags = AI_PASSIVE;
 
     char _port[5];
-    snprintf(_port, 5, "%d", port);
+    snprintf(_port, 5, "%d", worker->conf.port);
 
     int res = getaddrinfo(NULL, _port, &hints, &result);
 
@@ -89,11 +126,12 @@ int worker_start(worker_t* worker, int port)
 
     for (struct addrinfo* rp = result; rp; rp = rp->ai_next) {
         worker->socket = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
-
-        if (worker->socket != -1) {
+        if (worker->socket < 0) {
+            close(worker->socket);
+        } else {
             res = bind(worker->socket, rp->ai_addr, rp->ai_addrlen);
             if (res == 0) {
-                charon_info("charon running on %s:%d", inet_ntoa(((struct sockaddr_in*)rp->ai_addr)->sin_addr), port);
+                charon_info("charon running on %s:%d", inet_ntoa(((struct sockaddr_in*)rp->ai_addr)->sin_addr), worker->conf.port);
                 break;
             } else {
                 close(worker->socket);
@@ -155,7 +193,7 @@ int worker_create_event_loop(worker_t* worker) {
 
     worker->is_running = true;
 
-    return worker_init_handlers(worker);
+    return CHARON_OK;
 }
 
 int worker_accept_client(worker_t* worker, handler_t* handler, connection_t** result)
@@ -335,8 +373,7 @@ void worker_finish(worker_t* worker)
         }
     }
 
-    charon_info("clients stopped");
-    http_handler_on_finish(worker->http_handler);
+    charon_info("active connections stopped");
     close(worker->socket);
     charon_info("worker stopped");
 }
@@ -369,9 +406,13 @@ void worker_loop(worker_t* worker)
         events_count = epoll_wait(worker->epoll_fd, events, MAX_EVENTS, (int)timeout);
 
         if (events_count < 0) {
-            charon_perror("epoll_wait: ");
-            worker->is_running = false;
-            break;
+            if (errno == EINTR) {
+                continue;
+            } else {
+                charon_perror("epoll_wait: ");
+                worker->is_running = false;
+                break;
+            }
         }
 
         charon_debug("%d events in queue", events_count);
@@ -408,4 +449,90 @@ void worker_loop(worker_t* worker)
 void worker_stop(worker_t* worker)
 {
     worker->is_running = false;
+}
+
+void worker_stop_signal_handler(UNUSED int sig)
+{
+    worker_stop(global_server);
+}
+
+int worker_setup_signals()
+{
+    sigset_t mask;
+    sigfillset(&mask);
+    sigdelset(&mask, SIGTERM);
+    struct sigaction sigact = {
+        .sa_flags = 0,
+        .sa_handler = worker_stop_signal_handler,
+    };
+    if (sigaction(SIGTERM, &sigact, NULL) < 0) {
+        charon_perror("sigaction: ");
+        return -CHARON_ERR;
+    }
+    if (sigprocmask(SIG_BLOCK, &mask, NULL) < 0) {
+        charon_perror("sigprocmask: ");
+        return -CHARON_ERR;
+    }
+    return CHARON_OK;
+}
+
+pid_t worker_spawn(worker_t* worker)
+{
+    pid_t pid = fork();
+    if (pid == 0) {
+        worker_setup_signals();
+        worker->pid = getpid();
+        worker_loop(worker);
+        worker_destroy(worker);
+        exit(0);
+    } else if (pid < 0) {
+        charon_perror("fork: ");
+        return -CHARON_ERR;
+    } else {
+        return pid;
+    }
+}
+
+int worker_spawn_all(worker_t* worker)
+{
+    for (int i = 0; i < worker->conf.workers; i++) {
+        pid_t pid = worker_spawn(worker);
+        if (pid < 0) {
+            return -CHARON_ERR;
+        }
+        charon_info("spawned child process, pid=%d", pid);
+        vector_push(&worker->children, &pid, pid_t);
+    }
+    return CHARON_OK;
+}
+
+void worker_kill_all(worker_t* worker, int sig)
+{
+    for (size_t i = 0; i < vector_size(&worker->children); i++) {
+        kill(worker->children[i], sig);
+    }
+}
+
+int worker_wait_all(UNUSED worker_t* worker)
+{
+    int status;
+
+    for (;;) {
+        pid_t pid = wait(&status);
+        if (pid > 0) {
+            if (WIFEXITED(status)) {
+                charon_info("child process pid=%d exited, exit status=%d",
+                    pid, WEXITSTATUS(status));
+            } else if (WIFSIGNALED(status)) {
+                charon_info("child process pid=%d killed by signal %d",
+                    pid, WTERMSIG(status));
+            }
+        } else {
+            if (errno == ECHILD) {
+                return CHARON_OK;
+            } else {
+                return CHARON_AGAIN;
+            }
+        }
+    }
 }

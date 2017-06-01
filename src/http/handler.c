@@ -460,7 +460,7 @@ static conf_field_def_t vhost_fields_def[] = {
     { NULL, 0, 0 }
 };
 
-static conf_field_def_t main_fields_def[] = {
+static conf_field_def_t http_fields_def[] = {
     { "accept_timeout", CONF_TIME_INTERVAL, offsetof(http_main_conf_t, accept_timeout) },
     { "client_buffer_size", CONF_SIZE, offsetof(http_main_conf_t, client_buffer_size) },
     { NULL, 0, 0 }
@@ -468,11 +468,11 @@ static conf_field_def_t main_fields_def[] = {
 
 static conf_section_def_t conf_def[] = {
     { "vhost", CONF_ALLOW_MULTIPLE, vhost_fields_def, (conf_type_init_t) vhost_init, sizeof(vhost_t), offsetof(http_conf_t, vhosts) },
-    { "main", 0, main_fields_def, NULL, sizeof(http_main_conf_t), offsetof(http_conf_t, main) },
+    { "http", 0, http_fields_def, NULL, sizeof(http_main_conf_t), offsetof(http_conf_t, main) },
     { NULL, 0, NULL, NULL, 0, 0},
 };
 
-void http_handler_on_config_done(handler_t* handler)
+int http_handler_on_config_done(handler_t* handler)
 {
     http_conf_t* conf = handler->conf;
 
@@ -495,9 +495,13 @@ void http_handler_on_config_done(handler_t* handler)
                 ch++;
             }
             *ch++ = '\0';
-            charon_debug("%s", vhost->upstream.uri.start);
+        } else {
+            charon_error("'vhost' section requires either 'root' or 'upstream' fields");
+            return -CHARON_ERR;
         }
     }
+
+    return CHARON_OK;
 }
 
 void http_handler_cleanup_connection(http_connection_t* c)
@@ -519,13 +523,15 @@ http_conf_t* http_conf_create()
 
 void http_conf_destroy(http_conf_t* conf)
 {
-    for (size_t i = 0; i < vector_size(&conf->vhosts); i++) {
-        vhost_destroy(&conf->vhosts[i]);
+    if (conf->vhosts != NULL) {
+        for (size_t i = 0; i < vector_size(&conf->vhosts); i++) {
+            vhost_destroy(&conf->vhosts[i]);
+        }
+        vector_destroy(&conf->vhosts);
     }
-    vector_destroy(&conf->vhosts);
 }
 
-http_handler_t* http_handler_on_init()
+http_handler_t* http_handler_create()
 {
     http_handler_t* http_handler = malloc(sizeof(http_handler_t));
     handler_t* handler = (handler_t*) http_handler;
@@ -538,9 +544,8 @@ http_handler_t* http_handler_on_init()
     return http_handler;
 }
 
-void http_handler_on_finish(http_handler_t* h)
+void http_handler_destroy(http_handler_t* h)
 {
     http_conf_destroy(h->handler.conf);
     free(h->handler.conf);
-    free(h);
 }

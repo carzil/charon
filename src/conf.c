@@ -42,8 +42,7 @@ typedef struct {
     int line;
     int line_pos;
 
-    void* conf;
-    conf_section_def_t* conf_def;
+    conf_def_t* defs;
 
     conf_section_def_t* current_section_def;
     void* current_section;
@@ -64,15 +63,22 @@ void config_state_destroy(config_state_t* st)
     array_destroy(&st->token_s);
 }
 
-#define SECTION_DEF_IS_NOT_NULL(cd) (cd->name != NULL)
+#define SECTION_DEF_IS_NOT_NULL(sd) (sd->name != NULL)
 #define FIELD_DEF_IS_NOT_NULL(fd) (fd->name != NULL)
+#define CONF_DEF_IS_NOT_NULL(cd) (cd->conf != NULL)
 
 void config_init(config_state_t* st)
 {
-    conf_section_def_t* conf_def = st->conf_def;
-    while (SECTION_DEF_IS_NOT_NULL(conf_def)) {
-        if (conf_def->flags & CONF_ALLOW_MULTIPLE) {
-            vector_init((char*)st->conf + conf_def->offset);
+    conf_def_t* conf_def = st->defs;
+    conf_section_def_t* sect_def;
+
+    while (CONF_DEF_IS_NOT_NULL(conf_def)) {
+        sect_def = conf_def->sections;
+        while (SECTION_DEF_IS_NOT_NULL(sect_def)) {
+            if (sect_def->flags & CONF_ALLOW_MULTIPLE) {
+                vector_init((char*)conf_def->conf + sect_def->offset);
+            }
+            sect_def++;
         }
         conf_def++;
     }
@@ -264,15 +270,45 @@ static inline void copy_token_string(config_state_t* st, string_t* where)
     where->end = where->start + sz;
 }
 
-conf_section_def_t* config_find_section_def(conf_section_def_t* sect_def, char* name)
+int config_set_current_section(config_state_t* st, char* name)
 {
-    while (SECTION_DEF_IS_NOT_NULL(sect_def)) {
-        if (!strcmp(sect_def->name, name)) {
-            return sect_def;
+    conf_def_t* conf_def = st->defs;
+    conf_section_def_t* sect_def;
+    void* conf;
+
+    st->current_section_def = NULL;
+
+    while (CONF_DEF_IS_NOT_NULL(conf_def)) {
+        sect_def = conf_def->sections;
+        while (SECTION_DEF_IS_NOT_NULL(sect_def)) {
+            if (!strcmp(sect_def->name, name)) {
+                st->current_section_def = sect_def;
+                conf = conf_def->conf;
+                break;
+            }
+            sect_def++;
         }
-        sect_def++;
+        conf_def++;
     }
-    return NULL;
+
+    if (st->current_section_def == NULL) {
+        return -CHARON_ERR;
+    }
+
+    if (st->current_section_def->flags & CONF_ALLOW_MULTIPLE) {
+        void** v = (void**)((char*)conf + st->current_section_def->offset);
+        size_t idx = vector_size(v);
+        __vector_resize(v, idx + 1, st->current_section_def->type_size);
+        st->current_section = (char*)(*v) + st->current_section_def->type_size * idx;
+    } else {
+        st->current_section = (char*)conf + st->current_section_def->offset;
+    }
+
+    if (st->current_section_def->type_init != NULL) {
+        st->current_section_def->type_init(st->current_section);
+    }
+
+    return 0;
 }
 
 conf_field_def_t* config_find_field_def(conf_section_def_t* section, char* name)
@@ -294,6 +330,17 @@ int config_parse_string_field(config_state_t* st, conf_field_def_t* field_def)
 
     EXPECT_TOKEN(t_string);
     copy_token_string(st, str);
+    EXPECT_TOKEN(t_semicolon);
+    return CHARON_OK;
+}
+
+int config_parse_integer_field(config_state_t* st, conf_field_def_t* field_def)
+{
+    int res;
+    int* val = (int*)((char*)st->current_section + field_def->offset);
+
+    EXPECT_TOKEN(t_digit);
+    *val = strtol(st->token_s.data, NULL, 0);
     EXPECT_TOKEN(t_semicolon);
     return CHARON_OK;
 }
@@ -349,6 +396,8 @@ int config_parse_field(config_state_t* st, conf_field_def_t* field_def)
         return config_parse_time_interval_field(st, field_def);
     case CONF_SIZE:
         return config_parse_size_field(st, field_def);
+    case CONF_INTEGER:
+        return config_parse_integer_field(st, field_def);
     default:
         return -CHARON_ERR;
     }
@@ -384,22 +433,10 @@ int config_parse(config_state_t* st)
 
     WHILE_TOKEN() {
         if (st->token == t_id) {
-            st->current_section_def = config_find_section_def(st->conf_def, st->token_s.data);
-            if (st->current_section_def == NULL) {
+            if (config_set_current_section(st, st->token_s.data) != CHARON_OK) {
                 charon_error("unknown section '%s'", st->token_s.data);
-                break;
             }
-            if (st->current_section_def->flags & CONF_ALLOW_MULTIPLE) {
-                void** v = (void**)((char*)st->conf + st->current_section_def->offset);
-                size_t idx = vector_size(v);
-                __vector_resize(v, idx + 1, st->current_section_def->type_size);
-                st->current_section = (char*)(*v) + st->current_section_def->type_size * idx;
-            } else {
-                st->current_section = (char*)st->conf + st->current_section_def->offset;
-            }
-            if (st->current_section_def->type_init != NULL) {
-                st->current_section_def->type_init(st->current_section);
-            }
+
             res = config_parse_section(st);
             if (res != CHARON_OK) {
                 break;
@@ -415,15 +452,14 @@ int config_parse(config_state_t* st)
     return CHARON_OK;
 }
 
-int config_open(char* filename, void* conf, conf_section_def_t* conf_def)
+int config_open(char* filename, conf_def_t* defs)
 {
     config_state_t st;
     int res = CHARON_OK;
 
     config_state_init(&st);
     st.fd = open(filename, O_RDONLY);
-    st.conf = conf;
-    st.conf_def = conf_def;
+    st.defs = defs;
     if (st.fd < 0) {
         charon_perror("open: ");
         res = -CHARON_ERR;
