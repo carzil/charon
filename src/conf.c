@@ -389,18 +389,27 @@ int config_parse_size_field(config_state_t* st, conf_field_def_t* field_def)
 
 int config_parse_field(config_state_t* st, conf_field_def_t* field_def)
 {
+    int res;
     switch (field_def->type) {
     case CONF_STRING:
-        return config_parse_string_field(st, field_def);
+        res = config_parse_string_field(st, field_def);
+        break;
     case CONF_TIME_INTERVAL:
-        return config_parse_time_interval_field(st, field_def);
+        res = config_parse_time_interval_field(st, field_def);
+        break;
     case CONF_SIZE:
-        return config_parse_size_field(st, field_def);
+        res = config_parse_size_field(st, field_def);
+        break;
     case CONF_INTEGER:
-        return config_parse_integer_field(st, field_def);
+        res = config_parse_integer_field(st, field_def);
+        break;
     default:
         return -CHARON_ERR;
     }
+    if (res == CHARON_OK) {
+        field_def->parsed = 1;
+    }
+    return res;
 }
 
 int config_parse_section(config_state_t* st)
@@ -424,7 +433,40 @@ int config_parse_section(config_state_t* st)
     }
 
     ASSERT_TOKEN(t_close_brace);
+    st->current_section_def->parsed = 1;
     return res;
+}
+
+int config_check_required(config_state_t* st)
+{
+    conf_def_t* conf_def = st->defs;
+    conf_field_def_t* field_def;
+    conf_section_def_t* sect_def;
+
+    while (CONF_DEF_IS_NOT_NULL(conf_def)) {
+        sect_def = conf_def->sections;
+        while (SECTION_DEF_IS_NOT_NULL(sect_def)) {
+            if (!sect_def->parsed && (sect_def->flags & CONF_REQUIRED)) {
+                charon_error("section '%s' is required", sect_def->name);
+                return -CHARON_ERR;
+            }
+
+            if (sect_def->parsed) {
+                field_def = sect_def->allowed_fields;
+                while (FIELD_DEF_IS_NOT_NULL(field_def)) {
+                    if (!field_def->parsed && (field_def->flags & CONF_REQUIRED)) {
+                        charon_error("field '%s' in section '%s' is required", field_def->name, sect_def->name);
+                        return -CHARON_ERR;
+                    }
+                    field_def++;
+                }
+            }
+
+            sect_def++;
+        }
+        conf_def++;
+    }
+    return CHARON_OK;
 }
 
 int config_parse(config_state_t* st)
@@ -445,10 +487,16 @@ int config_parse(config_state_t* st)
             break;
         }
     }
+
     if (res != -CHARON_EOF) {
         charon_error("syntax error at %d:%d", st->line, st->line_pos);
         return -CHARON_ERR;
     }
+
+    if (config_check_required(st) != CHARON_OK) {
+        return -CHARON_ERR;
+    }
+
     return CHARON_OK;
 }
 

@@ -5,7 +5,8 @@
 #include "utils/string.h"
 
 enum {
-    CONF_ALLOW_MULTIPLE = 1
+    CONF_ALLOW_MULTIPLE = 1,
+    CONF_REQUIRED = 2,
 };
 
 typedef int (*conf_type_init_t)(void*);
@@ -18,7 +19,10 @@ typedef struct {
         CONF_SIZE,
         CONF_INTEGER,
     } type;
+    int flags;
     size_t offset;
+
+    unsigned parsed:1;
 } conf_field_def_t;
 
 typedef struct {
@@ -28,7 +32,21 @@ typedef struct {
     conf_type_init_t type_init;
     size_t type_size;
     size_t offset;
+
+    unsigned parsed:1;
 } conf_section_def_t;
+
+#define CONF_SECTION(name, flags, allowed_fields, type_init, type_size, offset) \
+    ((conf_section_def_t) { name, flags, allowed_fields, (conf_type_init_t) type_init, type_size, offset, 0 } )
+
+#define CONF_END_SECTIONS() \
+    ((conf_section_def_t) { NULL, 0, NULL, NULL, 0, 0, 0})
+
+#define CONF_FIELD(name, type, flags, offset) \
+    ((conf_field_def_t) { name, type, flags, offset, 0 })
+
+#define CONF_END_FIELDS() \
+    ((conf_field_def_t) { NULL, 0, 0, 0, 0 })
 
 typedef struct {
     void* conf;

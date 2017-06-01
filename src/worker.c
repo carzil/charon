@@ -71,19 +71,18 @@ int worker_conf_init(worker_conf_t* conf)
 {
     conf->port = 0;
     conf->workers = 0;
-    conf->parsed = 1;
     return CHARON_OK;
 }
 
 static conf_field_def_t main_fields_def[] = {
-    { "port", CONF_INTEGER, offsetof(worker_conf_t, port) },
-    { "workers", CONF_INTEGER, offsetof(worker_conf_t, workers) },
-    { NULL, 0, 0 }
+    CONF_FIELD("port", CONF_INTEGER, CONF_REQUIRED, offsetof(worker_conf_t, port)),
+    CONF_FIELD("workers", CONF_INTEGER, CONF_REQUIRED, offsetof(worker_conf_t, workers)),
+    CONF_END_FIELDS()
 };
 
 static conf_section_def_t worker_conf_def[] = {
-    { "main", 0, main_fields_def, (conf_type_init_t) worker_conf_init, sizeof(worker_conf_t), 0 },
-    { NULL, 0, NULL, NULL, 0, 0},
+    CONF_SECTION("main", CONF_REQUIRED, main_fields_def, worker_conf_init, sizeof(worker_conf_t), 0),
+    CONF_END_SECTIONS()
 };
 
 int worker_configure(worker_t* worker, char* conf_filename)
@@ -95,10 +94,6 @@ int worker_configure(worker_t* worker, char* conf_filename)
         { NULL, NULL }
     };
     if (config_open(conf_filename, conf_def) != CHARON_OK) {
-        return -CHARON_ERR;
-    }
-    if (!worker->conf.parsed) {
-        charon_error("'main' section is required");
         return -CHARON_ERR;
     }
     return handler->on_config_done(handler);
@@ -423,11 +418,13 @@ void worker_loop(worker_t* worker)
             } else {
                 c = worker->connections[epoll_event->data.fd];
                 if (c != NULL && epoll_event->events & EPOLLIN) {
+                    charon_debug("read event, fd=%d", epoll_event->data.fd);
                     c->read_ev.handler(&c->read_ev);
                 }
 
                 c = worker->connections[epoll_event->data.fd];
                 if (c != NULL && epoll_event->events & EPOLLOUT) {
+                    charon_debug("write event, fd=%d", epoll_event->data.fd);
                     c->write_ev.handler(&c->write_ev);
                 }
             }
@@ -476,15 +473,21 @@ int worker_setup_signals()
     return CHARON_OK;
 }
 
+int worker_run(worker_t* worker)
+{
+    // worker_setup_signals();
+    worker->pid = getpid();
+    worker_loop(worker);
+    worker_destroy(worker);
+
+    return 0;
+}
+
 pid_t worker_spawn(worker_t* worker)
 {
     pid_t pid = fork();
     if (pid == 0) {
-        worker_setup_signals();
-        worker->pid = getpid();
-        worker_loop(worker);
-        worker_destroy(worker);
-        exit(0);
+        exit(worker_run(worker));
     } else if (pid < 0) {
         charon_perror("fork: ");
         return -CHARON_ERR;

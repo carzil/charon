@@ -444,22 +444,22 @@ connection_t* http_handler_connection_create(worker_t* w, handler_t* h, int fd)
 }
 
 static conf_field_def_t vhost_fields_def[] = {
-    { "root", CONF_STRING, offsetof(vhost_t, root) },
-    { "name", CONF_STRING, offsetof(vhost_t, name) },
-    { "upstream", CONF_STRING, offsetof(vhost_t, upstream) + offsetof(http_upstream_t, uri) },
-    { NULL, 0, 0 }
+    CONF_FIELD("name", CONF_STRING, CONF_REQUIRED, offsetof(vhost_t, name)),
+    CONF_FIELD("root", CONF_STRING, 0, offsetof(vhost_t, root)),
+    CONF_FIELD("upstream", CONF_STRING, 0, offsetof(vhost_t, upstream) + offsetof(http_upstream_t, uri)),
+    CONF_END_FIELDS()
 };
 
 static conf_field_def_t http_fields_def[] = {
-    { "accept_timeout", CONF_TIME_INTERVAL, offsetof(http_main_conf_t, accept_timeout) },
-    { "client_buffer_size", CONF_SIZE, offsetof(http_main_conf_t, client_buffer_size) },
-    { NULL, 0, 0 }
+    CONF_FIELD("accept_timeout", CONF_TIME_INTERVAL, 0, offsetof(http_main_conf_t, accept_timeout)),
+    CONF_FIELD("client_buffer_size", CONF_SIZE, 0, offsetof(http_main_conf_t, client_buffer_size)),
+    CONF_END_FIELDS()
 };
 
 static conf_section_def_t conf_def[] = {
-    { "vhost", CONF_ALLOW_MULTIPLE, vhost_fields_def, (conf_type_init_t) vhost_init, sizeof(vhost_t), offsetof(http_conf_t, vhosts) },
-    { "http", 0, http_fields_def, NULL, sizeof(http_main_conf_t), offsetof(http_conf_t, main) },
-    { NULL, 0, NULL, NULL, 0, 0},
+    CONF_SECTION("vhost", CONF_ALLOW_MULTIPLE, vhost_fields_def, (conf_type_init_t) vhost_init, sizeof(vhost_t), offsetof(http_conf_t, vhosts)),
+    CONF_SECTION("http", CONF_REQUIRED, http_fields_def, NULL, sizeof(http_main_conf_t), offsetof(http_conf_t, main)),
+    CONF_END_SECTIONS()
 };
 
 int http_handler_on_config_done(handler_t* handler)

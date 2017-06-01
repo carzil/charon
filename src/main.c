@@ -151,13 +151,13 @@ int main(int argc, char* argv[])
     }
 
 
-    worker_spawn_all(global_server);
+    // worker_spawn_all(global_server);
 
     struct sigaction sigact = {
         .sa_flags = 0,
         .sa_handler = stop_signal_handler
     };
-    sigaction(SIGINT, &sigact, NULL);
+    // sigaction(SIGINT, &sigact, NULL);
     sigaction(SIGTERM, &sigact, NULL);
 
     sigact.sa_handler = alarm_signal_handler;
@@ -174,6 +174,8 @@ int main(int argc, char* argv[])
             break;
         }
     }
+
+    worker_run(global_server);
 
 cleanup:
     if (global_server != NULL) {

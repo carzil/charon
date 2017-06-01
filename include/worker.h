@@ -22,8 +22,6 @@ enum {
 typedef struct {
     int port;
     int workers;
-
-    unsigned parsed:1;
 } worker_conf_t;
 
 struct worker_s {
@@ -52,6 +50,7 @@ worker_t* worker_create();
 int worker_configure(worker_t* worker, char* conf_filename);
 void worker_destroy(worker_t* worker);
 int worker_start(worker_t* worker);
+int worker_run(worker_t* worker);
 void worker_stop(worker_t* worker);
 void worker_loop(worker_t* worker);
 void worker_stop_connection(connection_t* c);
