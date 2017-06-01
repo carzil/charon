@@ -124,6 +124,15 @@ int worker_start(worker_t* worker)
         if (worker->socket < 0) {
             close(worker->socket);
         } else {
+            int enable = 1;
+            if (setsockopt(worker->socket, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int)) < 0) {
+                charon_perror("setsockopt: ");
+            }
+
+            if (setsockopt(worker->socket, SOL_SOCKET, SO_REUSEPORT, &enable, sizeof(int)) < 0) {
+                charon_perror("setsockopt: ");
+            }
+
             res = bind(worker->socket, rp->ai_addr, rp->ai_addrlen);
             if (res == 0) {
                 charon_info("charon running on %s:%d", inet_ntoa(((struct sockaddr_in*)rp->ai_addr)->sin_addr), worker->conf.port);
@@ -144,15 +153,6 @@ int worker_start(worker_t* worker)
     if (res < 0) {
         charon_perror("bind: ");
         return 2;
-    }
-
-    int enable = 1;
-    if (setsockopt(worker->socket, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int)) < 0) {
-        charon_perror("setsockopt: ");
-    }
-
-    if (setsockopt(worker->socket, SOL_SOCKET, SO_REUSEPORT, &enable, sizeof(int)) < 0) {
-        charon_perror("setsockopt: ");
     }
 
     if (set_fd_non_blocking(worker->socket) == -1) {
