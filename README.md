@@ -25,5 +25,5 @@ Yes. Build it and then in build folder:
 make install
 ```
 
-# Something more?
-You can find more information in [wiki](https://github.com/carzil/charon/wiki).
+# Where to go next?
+Check [Getting started](https://github.com/carzil/charon/wiki/Getting-started) and other pages in [wiki](https://github.com/carzil/charon/wiki).
