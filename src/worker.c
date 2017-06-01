@@ -475,7 +475,7 @@ int worker_setup_signals()
 
 int worker_run(worker_t* worker)
 {
-    // worker_setup_signals();
+    worker_setup_signals();
     worker->pid = getpid();
     worker_loop(worker);
     worker_destroy(worker);
